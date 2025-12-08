@@ -1,8 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  reactCompiler: true,
+  // reactCompiler: true  ← 删除
+  experimental: {
+    /* other experimental flags */
+  },
 };
 
 export default nextConfig;

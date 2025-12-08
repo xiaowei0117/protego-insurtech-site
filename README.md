@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Protego InsurTech — My Insurance Site
 
-## Getting Started
+Front-of-house and agent portal demo for auto insurance: online quote flow, renewal tool, and login experience. Source stays private; this README is for external description and internal bring-up.
 
-First, run the development server:
+## Highlights
+- Quote wizard: address/driver/vehicle/coverage steps to generate auto quotes; supports new policy and renewal entry points.
+- Agent renewal assistant: authenticated agents can use `/renewal` to help customers renew.
+- Portal and auth: NextAuth sessions with redirects to login or dashboard when not authorized.
+- UI/UX: Next.js App Router + Tailwind 4 with custom brand hero, gradients, CTAs, product cards, and value props.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Tech Stack
+- Next.js 15 (App Router), React 18, TypeScript
+- Tailwind CSS 4
+- Prisma + PostgreSQL (sample DB; point to your own connection)
+- NextAuth for authentication; Nodemailer for email channel
+- Axios, fast-xml-parser, js2xmlparser for data handling
+
+## How to Showcase (without exposing code)
+- Record or capture a demo; store under `public/demo/` or link externally (avoid sensitive data).
+- For a public repo, keep only this README, product screenshots/GIFs, and optionally built static assets; keep source in a private repo.
+
+## Run Locally (private environment)
+1) Node 18+, install deps: `npm install`  
+2) Create `.env` (example):
 ```
+DATABASE_URL="postgresql://user:password@localhost:5432/insurance"
+NEXTAUTH_SECRET="your-secret"
+NEXTAUTH_URL="http://localhost:3000"
+EMAIL_SERVER=smtp://user:pass@smtp.example.com:587
+EMAIL_FROM="noreply@example.com"
+```
+3) Sync DB: `npx prisma db push`  
+4) Start dev server: `npm run dev` → open http://localhost:3000  
+5) To test auth flows, create user/agent accounts (via Prisma seed or manual DB insert).
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Directory Quick Tour
+- `src/app`: pages and API routes (home, login, dashboard, quote wizard, renewal, api/auth, etc.)
+- `src/components`: shared UI pieces (navbar, form steps, tables, CTAs)
+- `prisma`: schema and Prisma client setup
+- `public`: brand assets and static files
+- `sql/`: sample insurance-related SQL/scripts
+- `types` / `utils` / `lib`: form types, validation, Prisma/auth helpers
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Roadmap (for demo narrative)
+- Expand product lines: Home, Auto + Home, Condo, Rental
+- Richer agent tools: renewal recommendations, bulk import, notifications
+- Monitoring and audit logging
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+If you need screenshot/GIF placeholders or a more detailed seed/login guide, let me know.

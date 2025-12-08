@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+////  -----------------------------
+////   users (NextAuth compatible)
+////  -----------------------------
+model User {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  name       String?
+  image      String?
+  emailVerified DateTime?
+  password   String?
+  role       String   @default("customer")
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  accounts         Account[]
+  sessions         Session[]
+  applicants       applicant[]
+  quote_executions quote_execution[]
+  quotes           quote[]
+
+  @@map("users")
+}
+
+////  -----------------------------
+////   NextAuth tables
+////  -----------------------------
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+////  -----------------------------
+////   applicants
+////  -----------------------------
+
+model applicant {
+  id             Int       @id @default(autoincrement())
+  xref_key       String?   @unique
+  first_name     String?
+  last_name      String?
+  birth_date     DateTime?
+  gender         String?
+  marital_status String?
+  address        String?
+  unit           String?
+  city           String?
+  state          String?
+  zip_code       String?
+  residence      String?
+  phone          String?
+  email          String?
+  status         String?   @default("draft")
+  user_id        String?
+  extra          Json      @default("{}")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  // Relations
+  drivers           driver[]
+  vehicles          vehicle[]
+  current_insurance current_insurance?
+  coverage_configs  coverage_config?
+  quote_executions  quote_execution[]
+  quotes            quote[]
+  audit_logs        audit_log[]
+  user              User?              @relation(fields: [user_id], references: [id])
+
+  @@map("applicants")
+}
+
+////  -----------------------------
+////   drivers
+////  -----------------------------
+
+model driver {
+  id             Int       @id @default(autoincrement())
+  applicant_id   Int
+  first_name     String?
+  last_name      String?
+  birth_date     DateTime?
+  relationship   String?
+  marital_status String?
+  occupation     String?
+  education      String?
+  dl_number      String?
+  dl_state       String?
+  violations     Json      @default("[]")
+  accidents      Json      @default("[]")
+  extra          Json      @default("{}")
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @default(now()) @updatedAt
+
+  applicant applicant @relation(fields: [applicant_id], references: [id])
+
+  @@map("drivers")
+}
+
+////  -----------------------------
+////   vehicles
+////  -----------------------------
+
+model vehicle {
+  id           Int     @id @default(autoincrement())
+  applicant_id Int
+  vin          String?
+  year         String?
+  make         String?
+  model        String?
+  sub_model    String?
+  ownership    String?
+  usage        String?
+  mileage      String?
+
+  safety_features Json     @default("[]")
+  extra           Json     @default("{}")
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+
+  applicant applicant @relation(fields: [applicant_id], references: [id])
+
+  @@map("vehicles")
+}
+
+////  -----------------------------
+////   current_insurance
+////  -----------------------------
+
+model current_insurance {
+  id                  Int     @id @default(autoincrement())
+  applicant_id        Int     @unique
+  has_insurance       String?
+  provider            String?
+  duration            String?
+  bodily_injury_limit String?
+  lapse_duration      String?
+
+  claims Json @default("[]")
+  extra  Json @default("{}")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  applicant applicant @relation(fields: [applicant_id], references: [id])
+
+  @@map("current_insurance")
+}
+
+////  -----------------------------
+////   coverage_configs
+////  -----------------------------
+
+model coverage_config {
+  id                  Int     @id @default(autoincrement())
+  applicant_id        Int     @unique
+  bi_pd_liability     String?
+  uninsured_motorist  String?
+  pip                 String?
+  collision           String?
+  comprehensive       String?
+  rental              String?
+  roadside_assistance String?
+  umbrella            String?
+  gap                 String?
+  glass_coverage      String?
+  extra               Json    @default("{}")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  applicant applicant @relation(fields: [applicant_id], references: [id])
+
+  @@map("coverage_configs")
+}
+
+////  -----------------------------
+////   quote_executions
+////  -----------------------------
+
+model quote_execution {
+  id                 Int     @id @default(autoincrement())
+  applicant_id       Int
+  quote_execution_id String  @unique
+  user_id            String?
+
+  carrier_id   Int?
+  carrier_name String?
+  status       String?
+  submitted_at DateTime? @default(now())
+
+  error_message String?
+  retry_count   Int?      @default(0)
+  completed_at  DateTime?
+
+  extra        Json?
+  raw_response Json?
+
+  created_at DateTime @default(now())
+
+  applicant applicant @relation(fields: [applicant_id], references: [id])
+  user      User?     @relation(fields: [user_id], references: [id])
+  quotes    quote[]
+
+  @@map("quote_executions")
+}
+
+////  -----------------------------
+////   quotes
+////  -----------------------------
+
+model quote {
+  id                 Int     @id @default(autoincrement())
+  applicant_id       Int
+  quote_execution_id String?
+  user_id            String?
+
+  carrier_id   Int?
+  carrier_name String?
+
+  premium Decimal? @db.Decimal(10, 2)
+  term    String?
+
+  deductible Json?
+  discounts  Json?
+  fees       Json?
+
+  extra Json?
+  raw   Json?
+
+  created_at DateTime @default(now())
+
+  applicant applicant        @relation(fields: [applicant_id], references: [id])
+  execution quote_execution? @relation(fields: [quote_execution_id], references: [quote_execution_id])
+  user      User?            @relation(fields: [user_id], references: [id])
+
+  @@map("quotes")
+}
+
+////  -----------------------------
+////   audit_logs
+////  -----------------------------
+
+model audit_log {
+  id           Int      @id @default(autoincrement())
+  applicant_id Int
+  event        String?
+  message      String?
+  duration_ms  Int?
+  extra        Json     @default("{}")
+  created_at   DateTime @default(now())
+
+  applicant applicant @relation(fields: [applicant_id], references: [id])
+
+  @@map("audit_logs")
+}

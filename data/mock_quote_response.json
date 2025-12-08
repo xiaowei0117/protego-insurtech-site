@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "applicantId": "21039796",
+    "quoteExecutionId": "QX-abc123"
+  },
+  "carriers": [
+    {
+      "carrierId": "1535",
+      "carrierName": "Sample Mutual",
+      "monthlyPremium": 109.25,
+      "termPremium": 1311.00,
+      "coveragesSummary": ["BI 30/60", "PD 50,000", "Comp/Coll $500/$1000"]
+    },
+    {
+      "carrierId": "2001",
+      "carrierName": "Lynx Casualty",
+      "monthlyPremium": 114.80,
+      "termPremium": 1377.60,
+      "coveragesSummary": ["BI 30/60", "PD 50,000", "Comp/Coll $1000/$1000"]
+    },
+    {
+      "carrierId": "3009",
+      "carrierName": "Potato Insurance Co.",
+      "monthlyPremium": 122.00,
+      "termPremium": 1464.00,
+      "coveragesSummary": ["BI 30/60", "PD 50,000", "Liability Only"]
+    }
+  ]
+}

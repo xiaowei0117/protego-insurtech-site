@@ -1,0 +1,109 @@
+{
+  "xrefKey": "TEST-LEAD-0001",
+  "applicant": {
+    "applicantType": "Applicant",
+    "personalInfo": {
+      "name": { "prefix": "MR", "firstName": "Alex", "lastName": "Chen" },
+      "dob": "1990-01-01",
+      "gender": "Male",
+      "maritalStatus": "Single",
+      "relation": "Insured"
+    },
+    "address": {
+      "addressCode": "StreetAddress",
+      "streetNumber": "123",
+      "streetName": "Main St",
+      "city": "Houston",
+      "stateCode": "TX",
+      "county": "Harris",
+      "zip5": "77002",
+      "phone": { "type": "Mobile", "number": "5552223333" },
+      "preferredContactMethod": "Phone (Mobile)",
+      "validation": "None"
+    }
+  },
+  "priorPolicyInfo": {
+    "priorCarrier": "Other Standard",
+    "yearsWithPriorCarrier": { "years": 1, "months": 0 },
+    "yearsWithContinuousCoverage": { "years": 0, "months": 6 },
+    "priorLiabilityLimit": "30/60",
+    "priorPolicyTerm": "12 Month"
+  },
+  "policyInfo": {
+    "policyTerm": "12 Month",
+    "package": "Yes",
+    "creditCheckAuth": "Yes"
+  },
+  "residenceInfo": {
+    "currentAddress": {
+      "yearsAtCurrent": { "years": 3, "months": 0 },
+      "ownership": "Apartment"
+    }
+  },
+  "drivers": [
+    {
+      "id": "1",
+      "name": { "firstName": "Alex", "lastName": "Chen" },
+      "gender": "Male",
+      "dob": "1990-01-01",
+      "dlState": "TX",
+      "dateLicensed": "2008-01-01",
+      "dlStatus": "Valid",
+      "ageLicensed": 16,
+      "relation": "Insured",
+      "principalVehicle": "1",
+      "rated": "Rated",
+      "sr22": "No",
+      "fr44": "No",
+      "licenseRevokedSuspended": "No"
+    }
+  ],
+  "vehicles": [
+    {
+      "id": "1",
+      "useVinLookup": "No",
+      "year": 2020,
+      "vin": "1HGCM82633A123456",
+      "make": "Toyota",
+      "model": "Camry",
+      "subModel": "SE",
+      "antiLockBrake": "Yes",
+      "vehiclePurchaseDate": "2020-02-01"
+    }
+  ],
+  "vehiclesUse": [
+    {
+      "id": "1",
+      "usage": "Commute",
+      "oneWayMiles": 12,
+      "daysPerWeek": 5,
+      "weeksPerMonth": 4,
+      "annualMiles": 12000,
+      "ownership": "Owned",
+      "principalOperator": "1"
+    }
+  ],
+  "coverages": {
+    "general": { "BI": "30/60", "PD": "50000", "MP": "500", "UM": "State Minimum", "UIM": "30/60" },
+    "vehicle": [
+      {
+        "id": "1",
+        "otherCollisionDeductible": 2500,
+        "collisionDeductible": 1000,
+        "fullGlass": "No",
+        "towingDeductible": "40",
+        "rentalDeductible": "No Coverage",
+        "liabilityNotRequired": "No",
+        "loanLeaseCoverage": "No"
+      }
+    ],
+    "stateSpecific": { "tx": { "pip": "No Coverage", "autoDeathIndemnity": "5000", "umpd": "State Minimum" } }
+  },
+  "assignments": [
+    { "id": "1", "driverAssignment": { "id": "1", "percent": 100 } }
+  ],
+  "generalInfo": { "ratingStateCode": "TX" },
+  "extendedInfo": [
+    { "name": "ICQ|CARRIERS|ST_TX", "pairs": [ { "name": "carriers_list", "value": "1535" } ] }
+  ]
+}

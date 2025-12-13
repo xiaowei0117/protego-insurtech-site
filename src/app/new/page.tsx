@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import type { FormData, Driver } from "@/types/formData";
 
 import StepApplicant from "@/app/new/steps/StepApplicant";
@@ -298,6 +298,7 @@ function computeCompletedSteps(form: FormData) {
 
 export default function NewQuotePage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [touchedSteps, setTouchedSteps] = useState<number[]>([]);
 
   // Step 2 — Vehicle API
@@ -892,6 +893,25 @@ export default function NewQuotePage() {
       if (form.applicantId || applicantId)
         persistSession(form.applicantId || applicantId, useXrefKey);
 
+      const contactEmail = (form.contact.email || "").trim().toLowerCase();
+      let shouldSave = false;
+
+      if (contactEmail) {
+        try {
+          const existsRes = await fetch("/api/users/exists", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: contactEmail }),
+          });
+          if (existsRes.ok) {
+            const existsJson = await existsRes.json();
+            shouldSave = Boolean(existsJson?.exists);
+          }
+        } catch {
+          shouldSave = false;
+        }
+      }
+
       const payload = {
         submitMode,
         xrefKey: useXrefKey,
@@ -949,10 +969,10 @@ export default function NewQuotePage() {
         coverage: form.coverage,
         // Force mock quotes until EZLynx sandbox is available
         mock: true,
-        save: false,
+        save: shouldSave,
       };
 
-      setLastQuotePayload({ ...payload, save: true });
+      setLastQuotePayload(payload);
 
       const res = await fetch("/api/quotes/search", {
         method: "POST",
@@ -966,7 +986,29 @@ export default function NewQuotePage() {
       }
 
       const data = await res.json();
-      setResult(data);
+
+      const query = new URLSearchParams();
+      let cacheKey: string | null = null;
+      if (!shouldSave) {
+        cacheKey = `quote_result_${Date.now()}`;
+        if (typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(
+              cacheKey,
+              JSON.stringify({
+                payload,
+                result: data,
+              })
+            );
+          } catch {
+            // ignore storage errors
+          }
+        }
+      }
+      if (data?.execId) query.set("exec", data.execId);
+      if (cacheKey) query.set("key", cacheKey);
+      query.set("save", shouldSave ? "true" : "false");
+      router.push(`/quotes/result?${query.toString()}`);
     } catch (err: any) {
       setError(err.message || "Failed to get quotes");
     } finally {

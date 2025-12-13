@@ -316,8 +316,10 @@ export async function POST(req: Request) {
         console.log(`🟧 [${requestId}] ==================================\n`);
       }
 
+      let persistedExec = null;
+
       if (saveToDb) {
-        await persistQuoteExecution({
+        persistedExec = await persistQuoteExecution({
           applicantId: applicantDbId,
           userId: effectiveUserId,
           xrefKey,
@@ -344,6 +346,7 @@ export async function POST(req: Request) {
         premium: best.premium,
         quoteUrl: best.url,
         quotes: mockQuotes,
+        execId: persistedExec?.quote_execution_id || null,
         raw: { mock: true, xmlSent: submitXml },
       });
     }
@@ -428,13 +431,27 @@ export async function POST(req: Request) {
       json?.ApplicantResponse?.Url ||
       null;
 
-    if (saveToDb && contact?.email) {
-      await sendQuoteEmail({
-        to: contact.email,
-        applicant,
+    let persistedExec = null;
+
+    if (saveToDb) {
+      persistedExec = await persistQuoteExecution({
+        applicantId: applicantDbId,
+        userId: effectiveUserId,
+        xrefKey: body?.xrefKey,
+        submitMode,
         quotes: quote ? [quote] : [],
-        coverage,
+        raw: json,
+        status: "success",
       });
+
+      if (contact?.email) {
+        await sendQuoteEmail({
+          to: contact.email,
+          applicant,
+          quotes: quote ? [quote] : [],
+          coverage,
+        });
+      }
     }
 
     return NextResponse.json({
@@ -443,6 +460,7 @@ export async function POST(req: Request) {
       applicantId: appId,
       premium,
       quoteUrl,
+      execId: persistedExec?.quote_execution_id || null,
       raw: json,
     });
   } catch (err: any) {
@@ -464,8 +482,10 @@ export async function POST(req: Request) {
 
     const fallbackQuotes = buildMockQuotes(vehicles, drivers);
 
+    let persistedExec = null;
+
     if (saveToDb) {
-      await persistQuoteExecution({
+      persistedExec = await persistQuoteExecution({
         applicantId: applicantDbId,
         userId: effectiveUserId,
         xrefKey: body?.xrefKey,
@@ -483,6 +503,7 @@ export async function POST(req: Request) {
       applicantId: "MOCK-" + Math.floor(Math.random() * 999999),
       premium: fallbackQuotes[0].premium,
       quoteUrl: "https://mock.ezlynx.local/quote/ABC123",
+      execId: persistedExec?.quote_execution_id || null,
       quotes: fallbackQuotes,
       raw: { mock: true, apiError: err?.message },
     });

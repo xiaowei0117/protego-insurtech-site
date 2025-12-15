@@ -7,15 +7,10 @@ import { useRouter } from "next/navigation";
 type CachedQuote = {
   payload?: any;
   result?: {
-    quotes?: Array<{
-      id?: number;
-      carrier?: string;
-      carrier_name?: string | null;
-      premium?: string | number | null;
-      term?: string | null;
-      deductible?: string | null;
-    }>;
-    premium?: string | number | null;
+    primary?: QuoteResult;
+    spouse?: QuoteResult | null;
+    quotes?: QuoteResult["quotes"];
+    premium?: QuoteResult["premium"];
   };
 };
 
@@ -63,6 +58,9 @@ export default function ClientResult({ keyParam }: { keyParam: string }) {
     }
   }, [keyParam]);
 
+  const primaryResult = (data as any)?.primary ?? data ?? null;
+  const spouseResult = (data as any)?.spouse ?? null;
+
   if (!data) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
@@ -71,7 +69,9 @@ export default function ClientResult({ keyParam }: { keyParam: string }) {
     );
   }
 
-  const quotes = data.quotes || [];
+  const quotesPrimary = primaryResult?.quotes || [];
+  const quotesSpouse = spouseResult?.quotes || [];
+
   async function handleSave() {
     if (!payload) {
       setError("No quote payload to save. Please go back and re-run the quote.");
@@ -94,9 +94,7 @@ export default function ClientResult({ keyParam }: { keyParam: string }) {
       }
       setSaveMessage("Quote saved. You can view and edit it anytime.");
       setSaved(true);
-      if (json?.quotes) {
-        setData({ quotes: json.quotes, premium: json.premium });
-      }
+      if (json) setData(json);
     } catch (e: any) {
       setError(e?.message || "Failed to save quote");
     } finally {
@@ -148,7 +146,7 @@ export default function ClientResult({ keyParam }: { keyParam: string }) {
           </Link>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {quotes.map((q, idx) => (
+          {quotesPrimary.map((q, idx) => (
             <div
               key={q.id ?? idx}
               className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800"
@@ -163,9 +161,35 @@ export default function ClientResult({ keyParam }: { keyParam: string }) {
               {q.deductible && <div className="text-xs text-gray-600">Deductible: {q.deductible}</div>}
             </div>
           ))}
-          {!quotes.length && <div className="text-sm text-gray-600">No quote details available.</div>}
+          {!quotesPrimary.length && <div className="text-sm text-gray-600">No quote details available.</div>}
         </div>
       </section>
+
+      {spouseResult && (
+        <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Quotes (Spouse)</h2>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {quotesSpouse.map((q, idx) => (
+              <div
+                key={q.id ?? `sp-${idx}`}
+                className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800"
+              >
+                <div className="text-base font-semibold text-gray-900">
+                  {q.carrier_name || q.carrier || "Carrier"}
+                </div>
+                <div className="mt-1 text-lg font-bold text-gray-900">
+                  {q.premium ? `$${q.premium}` : "N/A"}
+                </div>
+                {q.term && <div className="text-xs text-gray-600">Term: {q.term}</div>}
+                {q.deductible && <div className="text-xs text-gray-600">Deductible: {q.deductible}</div>}
+              </div>
+            ))}
+            {!quotesSpouse.length && <div className="text-sm text-gray-600">No spouse quote details available.</div>}
+          </div>
+        </section>
+      )}
     </>
   );
 }

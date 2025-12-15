@@ -16,6 +16,8 @@ interface StepCoverageProps {
   canSave: boolean;
   saveMessage?: string | null;
   isReopen: boolean;
+  dualApplicantQuotes: boolean;
+  setDualApplicantQuotes: (v: boolean) => void;
 }
 
 export default function StepCoverage({
@@ -31,9 +33,16 @@ export default function StepCoverage({
   canSave,
   saveMessage,
   isReopen,
+  dualApplicantQuotes,
+  setDualApplicantQuotes,
 }: StepCoverageProps) {
-  const quotes = (result?.quotes as any[]) || [];
-  const primaryPremium = result?.premium || quotes?.[0]?.premium || null;
+  const primaryResult = result?.primary ?? result ?? null;
+  const spouseResult = result?.spouse ?? null;
+
+  const quotesPrimary = (primaryResult?.quotes as any[]) || [];
+  const primaryPremium = primaryResult?.premium || quotesPrimary?.[0]?.premium || null;
+  const quotesSpouse = (spouseResult?.quotes as any[]) || [];
+  const spousePremium = spouseResult?.premium || quotesSpouse?.[0]?.premium || null;
 
   const coverageFieldConfigs: {
     key: keyof FormData["coverage"];
@@ -94,14 +103,9 @@ export default function StepCoverage({
 
   return (
     <div className="space-y-8">
-      <h3 className="text-[#1EC8C8] font-semibold text-lg mb-4">
-        Choose your coverage package
-      </h3>
+      <h3 className="text-[#1EC8C8] font-semibold text-lg mb-4">Choose your coverage package</h3>
 
-      {/* =======================
-          三种预设套餐
-      =======================*/}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
         {[
           {
             name: "Basic",
@@ -124,9 +128,7 @@ export default function StepCoverage({
         ].map((pkg, idx) => (
           <div
             key={idx}
-            className={`relative border-2 ${
-              pkg.color
-            } rounded-xl p-5 shadow-sm hover:shadow-md cursor-pointer transition-all duration-200 ${
+            className={`relative border-2 ${pkg.color} rounded-xl p-5 shadow-sm hover:shadow-md cursor-pointer transition-all duration-200 ${
               form.selectedPackage === pkg.name ? "ring-2 ring-blue-600" : ""
             }`}
             onClick={() =>
@@ -137,21 +139,15 @@ export default function StepCoverage({
               })
             }
           >
-            <h4 className="text-lg font-semibold text-gray-800 flex items-center justify-between">
+            <h4 className="flex items-center justify-between text-lg font-semibold text-gray-800">
               {pkg.name}
               {form.selectedPackage === pkg.name && (
-                <span className="text-sm text-blue-600 font-medium">
-                  ✓ Selected
-                </span>
+                <span className="text-sm font-medium text-blue-600">Selected</span>
               )}
             </h4>
-
-            <p className="text-sm text-gray-500 mb-3">{pkg.desc}</p>
-
-            <ul className="text-sm text-gray-700 space-y-1">
-              {Object.entries(
-                pkg.coverage as Record<string, string>
-              ).map(([k, v]) => (
+            <p className="mb-3 text-sm text-gray-500">{pkg.desc}</p>
+            <ul className="space-y-1 text-sm text-gray-700">
+              {Object.entries(pkg.coverage as Record<string, string>).map(([k, v]) => (
                 <li key={k} className="flex justify-between border-b py-1">
                   <span>{k}</span>
                   <span className="font-medium">{v}</span>
@@ -162,23 +158,14 @@ export default function StepCoverage({
         ))}
       </div>
 
-      {/* =======================
-          自定义 Coverage
-      =======================*/}
       <div className="mt-8">
-        <h4 className="text-[#1EC8C8] font-semibold mb-4">
-          Customize your coverage
-        </h4>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <h4 className="text-[#1EC8C8] font-semibold mb-4">Customize your coverage</h4>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {coverageFieldConfigs.map(({ key, label, options }) => (
-            <div
-              key={key}
-              className="flex items-center justify-between border rounded-lg px-4 py-2"
-            >
+            <div key={key} className="flex items-center justify-between rounded-lg border px-4 py-2">
               <span className="text-sm font-medium text-gray-700">{label}</span>
               <select
-                className="border border-gray-300 rounded px-2 py-1 text-sm text-gray-800 w-44"
+                className="w-44 rounded border border-gray-300 px-2 py-1 text-sm text-gray-800"
                 value={form.coverage[key] || ""}
                 onChange={(e) =>
                   setForm({
@@ -202,112 +189,94 @@ export default function StepCoverage({
         </div>
       </div>
 
-      {/* =======================
-          Get Quote 按钮 + 结果
-      =======================*/}
       <div className="mt-10 space-y-4">
-        <button
-          onClick={() => handleGetQuotes("submitQuote")}
-          disabled={loading}
-          className="bg-[#1EC8C8] text-white px-6 py-3 rounded-lg hover:bg-[#19b3b3] disabled:opacity-50"
-        >
-          {loading ? "Getting quotes..." : "Get Quote"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => handleGetQuotes("submitQuote")}
+            disabled={loading}
+            className="rounded-lg bg-[#1EC8C8] px-6 py-3 text-white hover:bg-[#19b3b3] disabled:opacity-50"
+          >
+            {loading ? "Getting quotes..." : "Get Quote"}
+          </button>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-gray-300 text-[#1EC8C8] focus:ring-[#1EC8C8]"
+              checked={dualApplicantQuotes}
+              onChange={(e) => setDualApplicantQuotes(e.target.checked)}
+            />
+            Get 2 quotes using husband and wife as applicant
+          </label>
+        </div>
 
-        {/* 保存申请，但不报价 */}
-        {/* 
-        <button
-          onClick={() => handleGetQuotes("create")}
-          disabled={loading}
-          className="bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 disabled:opacity-50"
-        >
-          {loading ? "Saving..." : "Save Application"}
-        </button>
-        */}
-
-        {/* Error */}
         {error && (
-          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {error}
-          </div>
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
         )}
 
-            {/* Quote Result */}
-            {result && (
-              <div className="mt-6 rounded-xl border bg-white p-6 shadow">
-                <h4 className="text-lg font-semibold text-gray-900 mb-4">
-                  Quote Result
-                </h4>
-                <p className="text-sm text-gray-700 mb-3">
-                  Your agent will reach out to finalize your quote. We’ll also email the summary and next steps to the contact email you provided.
-                </p>
-
-            {/* Premium */}
-            {primaryPremium ? (
-              <p className="text-2xl font-bold text-gray-900">
-                Estimated Premium: ${primaryPremium}
+        {result && (
+          <div className="mt-6 space-y-6">
+            <div className="rounded-xl border bg-white p-6 shadow">
+              <h4 className="mb-4 text-lg font-semibold text-gray-900">Quote Result (Applicant)</h4>
+              <p className="mb-3 text-sm text-gray-700">
+                Your agent will reach out to finalize your quote. We’ll also email the summary and next steps to the
+                contact email you provided.
               </p>
-            ) : (
-              <p className="text-gray-500">No premium returned.</p>
-            )}
-
-            {/* Quote list (mock) */}
-            {quotes.length > 0 && (
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                {quotes.map((q, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded-lg border border-gray-200 bg-gray-50 p-3 shadow-sm"
-                  >
-                    <div className="flex items-center justify-between text-sm font-semibold text-gray-800">
-                      <span>{q.carrier}</span>
-                      {idx === 0 && (
-                        <span className="text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded">
-                          Best
-                        </span>
-                      )}
+              {primaryPremium ? (
+                <p className="text-2xl font-bold text-gray-900">Estimated Premium: ${primaryPremium}</p>
+              ) : (
+                <p className="text-gray-500">No premium returned.</p>
+              )}
+              {quotesPrimary.length > 0 && (
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  {quotesPrimary.map((q, idx) => (
+                    <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50 p-3 shadow-sm">
+                      <div className="flex items-center justify-between text-sm font-semibold text-gray-800">
+                        <span>{q.carrier || q.carrier_name}</span>
+                        {idx === 0 && (
+                          <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Best</span>
+                        )}
+                      </div>
+                      <div className="mt-1 text-lg font-bold text-gray-900">${q.premium}</div>
+                      {q.eta && <div className="text-xs text-gray-500">ETA: {q.eta}</div>}
                     </div>
-                    <div className="text-lg font-bold text-gray-900 mt-1">
-                      ${q.premium}
-                    </div>
-                    {q.eta && (
-                      <div className="text-xs text-gray-500">ETA: {q.eta}</div>
-                    )}
+                  ))}
+                </div>
+              )}
+            </div>
 
-                    {q.url && (
-                      <a
-                        href={q.url}
-                        target="_blank"
-                        className="text-xs text-blue-600 underline mt-2 inline-block"
-                      >
-                        View mock quote →
-                      </a>
-                    )}
+            {spouseResult && (
+              <div className="rounded-xl border bg-white p-6 shadow">
+                <h4 className="mb-4 text-lg font-semibold text-gray-900">Quote Result (Spouse)</h4>
+                {spousePremium ? (
+                  <p className="text-2xl font-bold text-gray-900">Estimated Premium: ${spousePremium}</p>
+                ) : (
+                  <p className="text-gray-500">No premium returned.</p>
+                )}
+                {quotesSpouse.length > 0 && (
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    {quotesSpouse.map((q, idx) => (
+                      <div key={idx} className="rounded-lg border border-gray-200 bg-gray-50 p-3 shadow-sm">
+                        <div className="flex items-center justify-between text-sm font-semibold text-gray-800">
+                          <span>{q.carrier || q.carrier_name}</span>
+                          {idx === 0 && (
+                            <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">Best</span>
+                          )}
+                        </div>
+                        <div className="mt-1 text-lg font-bold text-gray-900">${q.premium}</div>
+                        {q.eta && <div className="text-xs text-gray-500">ETA: {q.eta}</div>}
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             )}
 
-            {/* Quote URL */}
-            {result.quoteUrl && (
-              <a
-                href={result.quoteUrl}
-                target="_blank"
-                className="text-blue-600 underline text-sm mt-4 inline-block"
-              >
-                View full quote details →
-              </a>
-            )}
-
-            {/* Save prompt (hide for reopen/edit flow) */}
             {!isReopen && (
               <div className="mt-6 rounded-lg border border-teal-100 bg-teal-50 p-4">
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="text-sm text-gray-800">
                     Want to save your quote?
-                    <span className="block text-gray-600">
-                      ✅ Yes, save and sign in to view/edit anytime.
-                    </span>
+                    <span className="block text-gray-600">Yes, save and sign in to view/edit anytime.</span>
                   </div>
                   <button
                     onClick={handleSaveQuote}
@@ -317,17 +286,12 @@ export default function StepCoverage({
                     {savingQuote ? "Saving..." : "Save my quote"}
                   </button>
                 </div>
-                {saveMessage && (
-                  <p className="mt-2 text-xs text-teal-800">{saveMessage}</p>
-                )}
+                {saveMessage && <p className="mt-2 text-xs text-teal-800">{saveMessage}</p>}
               </div>
             )}
 
-            {/* Debug Mock Mode */}
-            {result.raw?.mock && (
-              <div className="mt-4 text-xs text-gray-500">
-                (Mock Mode Active — not calling EZLynx API)
-              </div>
+            {result?.raw?.mock && (
+              <div className="mt-4 text-xs text-gray-500">(Mock Mode Active - not calling EZLynx API)</div>
             )}
           </div>
         )}

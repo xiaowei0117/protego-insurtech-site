@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import AgentCreator from "./AgentCreator";
 
 export default async function AgentLoginPage() {
   const session = await getServerSession(authOptions as any);
@@ -35,6 +36,8 @@ export default async function AgentLoginPage() {
             Email login
           </a>
         </div>
+
+        <AgentCreator />
 
         <p className="mt-6 text-center text-xs text-gray-500">
           Need help? Contact admin to get an agent account.

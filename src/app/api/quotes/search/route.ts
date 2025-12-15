@@ -7,8 +7,8 @@ import nodemailer from "nodemailer";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/authOptions";
 import { buildEZAUTOXml, buildSubmitQuoteXml } from "./xmlBuilders";
+import crypto from "crypto";
 
-// === 环境变量 ===
 const BASE = process.env.EZLYNX_BASE_URL || "";
 const TOKEN = process.env.EZLYNX_TOKEN || "";
 const TEMPLATE_ID = process.env.EZLYNX_TEMPLATE_ID || "9436";
@@ -29,16 +29,12 @@ function buildMockQuotes(vehicles: any[] = [], drivers: any[] = []) {
     carrier: v.carrier,
     premium: (base * v.multiplier + i * 12).toFixed(2),
     eta: v.eta,
-    url: `https://mock.ezlynx.local/quote/${v.carrier
-      .toLowerCase()
-      .replace(/\s+/g, "-")}`,
+    url: `https://mock.ezlynx.local/quote/${v.carrier.toLowerCase().replace(/\s+/g, "-")}`,
   }));
 }
 
-// 小工具 delay
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// 美化 XML 输出（简单缩进）
 function prettyXml(xml: string) {
   return xml.replace(/></g, ">\n<");
 }
@@ -72,6 +68,236 @@ async function ensureUser(email?: string | null, name?: string | null) {
   return user;
 }
 
+const toISODate = (date?: string | null) => {
+  if (!date) return null;
+  try {
+    return new Date(date).toISOString();
+  } catch {
+    return null;
+  }
+};
+
+function mapCoverageToConfig(coverage: any, selectedPackage?: string | null) {
+  if (!coverage) return null;
+  return {
+    bi_pd_liability: coverage["Bodily Injury Liability"] || null,
+    uninsured_motorist: coverage["Uninsured/Underinsured Motorist Bodily Injury"] || null,
+    pip: coverage["Personal Injury Protection"] || null,
+    collision: coverage["Collision Deductible"] || null,
+    comprehensive: coverage["Comprehensive Deductible"] || null,
+    rental: coverage["Rental"] || null,
+    roadside_assistance: coverage["Roadside"] || null,
+    extra: {
+      property_damage: coverage["Property Damage"] || null,
+      uninsured_property_damage: coverage["Uninsured/Underinsured Property Damage"] || null,
+      medical_payment: coverage["Medical Payment"] || null,
+      selectedPackage: selectedPackage || null,
+      rawCoverage: coverage,
+    },
+  };
+}
+
+function normalizeDrivers(drivers: any[] = []) {
+  return drivers.map((d) => ({
+    first_name: d.firstName ?? d.first_name ?? null,
+    last_name: d.lastName ?? d.last_name ?? null,
+    birth_date: d.birthDate ?? d.birth_date ?? null,
+    relationship: d.relationship ?? null,
+    marital_status: d.maritalStatus ?? d.marital_status ?? null,
+    occupation: d.occupation ?? null,
+    education: d.education ?? null,
+    dl_number: d.dlNumber ?? d.dl_number ?? null,
+    dl_state: d.dlState ?? d.dl_state ?? null,
+    extra: d.extra ?? {},
+  }));
+}
+
+function buildSpouseDrivers({
+  spouse,
+  applicant,
+  drivers,
+}: {
+  spouse: any;
+  applicant: any;
+  drivers: any[];
+}) {
+  const normalized = normalizeDrivers(drivers);
+  const primaryDriver = normalized[0] || {};
+
+  const spouseDriver = {
+    first_name: spouse?.firstName ?? spouse?.first_name ?? applicant?.firstName ?? applicant?.first_name ?? "Spouse",
+    last_name: spouse?.lastName ?? spouse?.last_name ?? applicant?.lastName ?? applicant?.last_name ?? null,
+    birth_date: spouse?.birthDate ?? spouse?.birth_date ?? null,
+    relationship: "Self",
+    marital_status: spouse?.maritalStatus ?? applicant?.maritalStatus ?? applicant?.marital_status ?? "Married",
+    occupation: spouse?.occupation ?? null,
+    education: spouse?.education ?? null,
+    dl_number: spouse?.dlNumber ?? spouse?.dl_number ?? null,
+    dl_state: spouse?.dlState ?? spouse?.dl_state ?? null,
+    extra: {},
+  };
+
+  const applicantDriver = {
+    ...primaryDriver,
+    first_name: applicant?.firstName ?? applicant?.first_name ?? primaryDriver.first_name ?? null,
+    last_name: applicant?.lastName ?? applicant?.last_name ?? primaryDriver.last_name ?? null,
+    birth_date: applicant?.birthDate ?? applicant?.birth_date ?? primaryDriver.birth_date ?? null,
+    relationship: "Spouse",
+  };
+
+  return [spouseDriver, applicantDriver, ...normalized.slice(1)];
+}
+
+async function upsertApplicantWithRelations(opts: {
+  xrefKey: string;
+  applicant: any;
+  contact?: any;
+  vehicles?: any[];
+  drivers?: any[];
+  coverage?: any;
+  selectedPackage?: string | null;
+  userId?: string | null;
+  extra?: Record<string, any>;
+  currentInsurance?: {
+    has_insurance?: string | null;
+    provider?: string | null;
+    duration?: string | null;
+    bodily_injury_limit?: string | null;
+    lapse_duration?: string | null;
+    claims?: any;
+    extra?: any;
+  } | null;
+}) {
+  const {
+    xrefKey,
+    applicant,
+    contact,
+    vehicles = [],
+    drivers = [],
+    coverage,
+    selectedPackage,
+    userId,
+    extra = {},
+    currentInsurance = null,
+  } = opts;
+
+  const applicantData = {
+    first_name: applicant?.firstName ?? applicant?.first_name ?? null,
+    last_name: applicant?.lastName ?? applicant?.last_name ?? null,
+    birth_date: toISODate(applicant?.birthDate ?? applicant?.birth_date),
+    gender: applicant?.gender ?? applicant?.sex ?? null,
+    marital_status: applicant?.maritalStatus ?? applicant?.marital_status ?? null,
+    address: applicant?.address ?? null,
+    unit: applicant?.unit ?? null,
+    city: applicant?.city ?? null,
+    state: applicant?.state ?? null,
+    zip_code: applicant?.zipCode ?? applicant?.zip_code ?? null,
+    residence: applicant?.residence ?? null,
+    phone: contact?.phone ?? applicant?.phone ?? null,
+    email: contact?.email ?? applicant?.email ?? null,
+    status: "draft",
+    xref_key: xrefKey,
+    user_id: userId || null,
+    extra,
+  };
+
+  const applicantRecord = await prisma.applicant.upsert({
+    where: { xref_key: xrefKey },
+    update: applicantData,
+    create: applicantData,
+  });
+
+  await prisma.vehicle.deleteMany({ where: { applicant_id: applicantRecord.id } });
+  if (vehicles.length) {
+    await prisma.vehicle.createMany({
+      data: vehicles.map((v: any) => ({
+        applicant_id: applicantRecord.id,
+        vin: v.vin ?? v.VIN ?? null,
+        year: v.year ?? null,
+        make: v.make ?? null,
+        model: v.model ?? null,
+        sub_model: v.subModel ?? v.sub_model ?? null,
+        ownership: v.ownership != null ? String(v.ownership) : null,
+        usage: v.usage != null ? String(v.usage) : null,
+        mileage: v.mileage != null ? String(v.mileage) : null,
+        extra: v.extra ?? {},
+      })),
+    });
+  }
+
+  await prisma.driver.deleteMany({ where: { applicant_id: applicantRecord.id } });
+  const normalizedDrivers = drivers.map((d: any) => ({
+    applicant_id: applicantRecord.id,
+    first_name: d.first_name ?? d.firstName ?? null,
+    last_name: d.last_name ?? d.lastName ?? null,
+    birth_date: toISODate(d.birth_date ?? d.birthDate),
+    relationship: d.relationship ?? null,
+    marital_status: d.marital_status ?? d.maritalStatus ?? null,
+    occupation: d.occupation ?? null,
+    education: d.education ?? null,
+    dl_number: d.dl_number ?? d.dlNumber ?? null,
+    dl_state: d.dl_state ?? d.dlState ?? null,
+    extra: d.extra ?? {},
+  }));
+
+  if (normalizedDrivers.length) {
+    await prisma.driver.createMany({ data: normalizedDrivers });
+  }
+
+  const coverageConfig = mapCoverageToConfig(coverage, selectedPackage);
+  if (coverageConfig) {
+    const existingCov = await prisma.coverage_config.findFirst({
+      where: { applicant_id: applicantRecord.id },
+    });
+
+    if (existingCov) {
+      await prisma.coverage_config.update({
+        where: { id: existingCov.id },
+        data: { ...coverageConfig },
+      });
+    } else {
+      await prisma.coverage_config.create({
+        data: {
+          applicant_id: applicantRecord.id,
+          ...coverageConfig,
+        },
+      });
+    }
+  }
+
+  if (currentInsurance) {
+    const existingIns = await prisma.current_insurance.findFirst({
+      where: { applicant_id: applicantRecord.id },
+    });
+
+    const insuranceData = {
+      has_insurance: currentInsurance.has_insurance ?? currentInsurance.hasInsurance ?? null,
+      provider: currentInsurance.provider ?? null,
+      duration: currentInsurance.duration ?? null,
+      bodily_injury_limit: currentInsurance.bodily_injury_limit ?? null,
+      lapse_duration: currentInsurance.lapse_duration ?? null,
+      claims: (currentInsurance as any).claims ?? [],
+      extra: (currentInsurance as any).extra ?? {},
+    };
+
+    if (existingIns) {
+      await prisma.current_insurance.update({
+        where: { id: existingIns.id },
+        data: insuranceData,
+      });
+    } else {
+      await prisma.current_insurance.create({
+        data: {
+          applicant_id: applicantRecord.id,
+          ...insuranceData,
+        },
+      });
+    }
+  }
+
+  return applicantRecord;
+}
+
 async function sendQuoteEmail({
   to,
   applicant,
@@ -93,7 +319,6 @@ async function sendQuoteEmail({
 
   try {
     const transporter = nodemailer.createTransport(server);
-    const primary = quotes?.[0] || null;
     const coverageLines = coverage
       ? Object.entries(coverage)
           .filter(([, v]) => Boolean(v))
@@ -103,8 +328,7 @@ async function sendQuoteEmail({
 
     const summaryLines =
       quotes?.map(
-        (q: any, idx: number) =>
-          `${idx === 0 ? "Best" : "Option"} - ${q.carrier || "N/A"}: $${q.premium || "—"}`
+        (q: any, idx: number) => `${idx === 0 ? "Best" : "Option"} - ${q.carrier || "N/A"}: $${q.premium || "N/A"}`
       ) || [];
 
     const text = `
@@ -126,7 +350,7 @@ If you have questions, just reply to this email.
     await transporter.sendMail({
       to,
       from,
-      subject: "Your auto quote — Protego InsureTech",
+      subject: "Your auto quote • Protego InsureTech",
       text,
     });
   } catch (err: any) {
@@ -147,7 +371,7 @@ async function persistQuoteExecution(opts: {
   const { applicantId, userId, xrefKey, submitMode, quotes, raw, status, error } = opts;
   if (!applicantId) {
     console.warn("persistQuoteExecution skipped: missing applicantId");
-    return null; // 无 applicant 无需落库
+    return null;
   }
 
   const baseKey = (xrefKey || Math.random().toString(36).slice(2)).slice(0, 24);
@@ -174,9 +398,7 @@ async function persistQuoteExecution(opts: {
           user_id: userId || null,
           quote_execution_id: execId,
           carrier_name: q.carrier || q.Carrier || "N/A",
-          premium: q.premium
-            ? new Prisma.Decimal(String(q.premium))
-            : null,
+          premium: q.premium ? new Prisma.Decimal(String(q.premium)) : null,
           term: q.term || null,
           deductible: q.deductible || null,
           discounts: q.discounts || null,
@@ -186,14 +408,14 @@ async function persistQuoteExecution(opts: {
       });
     }
 
-      await prisma.audit_log.create({
-        data: {
-          applicant_id: applicantId,
-          event: `quote_${status}`,
-          message: `Quote execution ${status}`,
-          extra: { submitMode, xrefKey, execId, quoteCount: quotes?.length || 0 },
-        },
-      });
+    await prisma.audit_log.create({
+      data: {
+        applicant_id: applicantId,
+        event: `quote_${status}`,
+        message: `Quote execution ${status}`,
+        extra: { submitMode, xrefKey, execId, quoteCount: quotes?.length || 0 },
+      },
+    });
 
     return exec;
   } catch (e: any) {
@@ -205,89 +427,266 @@ async function persistQuoteExecution(opts: {
 export async function POST(req: Request) {
   const requestId = Math.random().toString(36).substring(2, 10);
   let submitMode = "submitQuote";
+  let spouseDrivers: any[] = [];
+  let spouseApplicantRecord: any = null;
+  let coverageForEmail: any = null;
+  let contactForEmail: any = null;
+  let applicantForEmail: any = null;
+  let shouldRunSpouse = false;
+  let applicantDbId: number | null = null;
+  let spouseApplicantDbId: number | null = null;
+  let spouseApplicantForXml: any = null;
+  let spouseXrefKey: string | null = null;
+  let requestBody: any = null;
+  let effectiveUserId: string | null | undefined = null;
+  let primaryCurrentInsurance: any = null;
+  let spouseCurrentInsurance: any = null;
 
   try {
-    
     const session = await getServerSession(authOptions as any);
     const sessionUserId = (session as any)?.user?.id as string | undefined;
 
-  const body = await req.json();
-  console.log("🟦 Incoming Quote Request — xrefKey:", body.xrefKey);
+    requestBody = await req.json();
+    console.log(`[${requestId}] Incoming Quote Request xrefKey:`, requestBody?.xrefKey);
 
-  submitMode = body.submitMode;
-  const forceMock = Boolean(body?.mock);
-  const saveToDb = Boolean(body?.save);
+    submitMode = requestBody.submitMode;
+    const forceMock = Boolean(requestBody?.mock);
+    const saveToDb = Boolean(requestBody?.save);
 
-  const {
-    xrefKey,
-    applicantId,
-    applicant,
-    vehicles,
-    drivers,
-    spouse,
-    selectedPackage,
-    coverage,
-    contact,
-  } = body;
-  const applicantDbId = await resolveApplicantId(applicantId, xrefKey);
-  if (saveToDb && applicantDbId && sessionUserId) {
-    try {
-      await prisma.applicant.update({
-        where: { id: applicantDbId },
-        data: { user_id: sessionUserId },
-      });
-    } catch (e) {
-      console.warn("attach user_id to applicant failed:", (e as any)?.message);
+    const rawXrefKey = requestBody.xrefKey || crypto.randomUUID();
+    const baseXrefKey = rawXrefKey.endsWith("-spouse") ? rawXrefKey.replace(/-spouse$/, "") : rawXrefKey;
+    const isSpouseContext = rawXrefKey.endsWith("-spouse");
+
+    const {
+      xrefKey,
+      applicantId,
+      applicant,
+      vehicles = [],
+      drivers = [],
+      spouse: spouseInput,
+      selectedPackage,
+      coverage,
+      contact,
+      dualApplicantQuotes,
+    } = requestBody;
+
+    applicantForEmail = applicant;
+    contactForEmail = contact;
+    coverageForEmail = coverage;
+
+    const effectiveXrefKey = baseXrefKey;
+    const spouseXrefNormalized = `${baseXrefKey}-spouse`;
+
+    // Resolve primary/spouse applicants based on context to avoid recreating records
+    if (isSpouseContext) {
+      spouseApplicantDbId = await resolveApplicantId(applicantId, rawXrefKey);
+      applicantDbId = await resolveApplicantId(null, baseXrefKey);
+    } else {
+      applicantDbId = await resolveApplicantId(applicantId, baseXrefKey);
+      spouseApplicantDbId = await resolveApplicantId(null, spouseXrefNormalized);
     }
-  }
 
-  let effectiveUserId = sessionUserId;
-  if (saveToDb && !effectiveUserId) {
-    const contactEmail = contact?.email || applicant?.email || null;
-    const contactName = `${applicant?.firstName ?? ""} ${applicant?.lastName ?? ""}`.trim();
-    const user = await ensureUser(contactEmail, contactName || contactEmail);
-    effectiveUserId = user?.id;
+    primaryCurrentInsurance = applicantDbId
+      ? await prisma.current_insurance.findFirst({ where: { applicant_id: applicantDbId } })
+      : null;
+    spouseCurrentInsurance = spouseApplicantDbId
+      ? await prisma.current_insurance.findFirst({ where: { applicant_id: spouseApplicantDbId } })
+      : null;
 
-    if (user?.id && applicantDbId) {
+    if (saveToDb && applicantDbId && sessionUserId) {
       try {
         await prisma.applicant.update({
           where: { id: applicantDbId },
-          data: { user_id: user.id },
+          data: { user_id: sessionUserId },
         });
       } catch (e) {
-        console.warn("attach ensured user to applicant failed:", (e as any)?.message);
+        console.warn("attach user_id to applicant failed:", (e as any)?.message);
       }
     }
-  }
 
-    /* ===========================================================
-     * ① 构建 EZAuto XML（基础 XML）
-     * =========================================================== */
-    const ezautoXml = buildEZAUTOXml({
-      applicant,
+    effectiveUserId = sessionUserId;
+    if (saveToDb && !effectiveUserId) {
+      const contactEmail = contact?.email || applicant?.email || null;
+      const contactName = `${applicant?.firstName ?? ""} ${applicant?.lastName ?? ""}`.trim();
+      const user = await ensureUser(contactEmail, contactName || contactEmail);
+      effectiveUserId = user?.id;
+
+      if (user?.id && applicantDbId) {
+        try {
+          await prisma.applicant.update({
+            where: { id: applicantDbId },
+            data: { user_id: user.id },
+          });
+        } catch (e) {
+          console.warn("attach ensured user to applicant failed:", (e as any)?.message);
+        }
+      }
+    }
+
+    shouldRunSpouse = Boolean(dualApplicantQuotes && (spouseInput || isSpouseContext));
+    spouseXrefKey = shouldRunSpouse ? spouseXrefNormalized : null;
+
+    // Determine which applicant is primary for this request
+    const primaryApplicantInput = isSpouseContext ? spouseInput || applicant : applicant;
+    const spouseApplicantInput = isSpouseContext ? applicant : spouseInput;
+
+    // Reorder drivers so that primary is Self, spouse is Spouse
+    const normalizeDriverList = (list: any[]) =>
+      list.map((d) => ({
+        first_name: d.firstName ?? d.first_name ?? null,
+        last_name: d.lastName ?? d.last_name ?? null,
+        birth_date: d.birthDate ?? d.birth_date ?? null,
+        relationship: d.relationship ?? null,
+        marital_status: d.maritalStatus ?? d.marital_status ?? null,
+        occupation: d.occupation ?? null,
+        education: d.education ?? null,
+        dl_number: d.dlNumber ?? d.dl_number ?? null,
+        dl_state: d.dlState ?? d.dl_state ?? null,
+        extra: d.extra ?? {},
+      }));
+
+    const rawDriversNorm = normalizeDriverList(drivers);
+    const buildOrderedDrivers = (primary: any, spouse: any | null, list: any[]) => {
+      const primaryFromList = list.find((d) => (d.relationship || "").toLowerCase() === "self") || list[0];
+      const spouseFromList = list.find((d) => (d.relationship || "").toLowerCase() === "spouse");
+
+      const primaryDriver = {
+        ...(primaryFromList || {}),
+        first_name: primary?.firstName ?? primary?.first_name ?? primaryFromList?.first_name ?? null,
+        last_name: primary?.lastName ?? primary?.last_name ?? primaryFromList?.last_name ?? null,
+        birth_date: primary?.birthDate ?? primary?.birth_date ?? primaryFromList?.birth_date ?? null,
+        relationship: "Self",
+      };
+
+      const spouseDriver = spouse
+        ? {
+            ...(spouseFromList || {}),
+            first_name: spouse?.firstName ?? spouse?.first_name ?? spouseFromList?.first_name ?? null,
+            last_name: spouse?.lastName ?? spouse?.last_name ?? spouseFromList?.last_name ?? null,
+            birth_date: spouse?.birthDate ?? spouse?.birth_date ?? spouseFromList?.birth_date ?? null,
+            relationship: "Spouse",
+            occupation: spouse?.occupation ?? spouse?.spouseOccupation ?? spouseFromList?.occupation ?? null,
+            education: spouse?.education ?? spouse?.spouseEducation ?? spouseFromList?.education ?? null,
+          }
+        : null;
+
+      const rest = list.filter((d) => d !== primaryFromList && d !== spouseFromList);
+      return spouseDriver ? [primaryDriver, spouseDriver, ...rest] : [primaryDriver, ...rest];
+    };
+
+    const orderedDriversForPrimary = buildOrderedDrivers(primaryApplicantInput, spouseApplicantInput, rawDriversNorm);
+    const orderedDriversForSpouse = shouldRunSpouse
+      ? buildOrderedDrivers(spouseApplicantInput, primaryApplicantInput, rawDriversNorm)
+      : rawDriversNorm;
+
+    if (shouldRunSpouse) {
+      spouseDrivers = orderedDriversForSpouse.map((d) => ({
+        first_name: d.first_name,
+        last_name: d.last_name,
+        birth_date: d.birth_date,
+        relationship: d.relationship,
+        marital_status: d.marital_status,
+        occupation: d.occupation,
+        education: d.education,
+        dl_number: d.dl_number,
+        dl_state: d.dl_state,
+        extra: d.extra,
+      }));
+
+      spouseApplicantForXml = {
+        firstName:
+          spouseApplicantInput?.firstName ??
+          spouseApplicantInput?.first_name ??
+          primaryApplicantInput?.firstName ??
+          primaryApplicantInput?.first_name,
+        lastName:
+          spouseApplicantInput?.lastName ??
+          spouseApplicantInput?.last_name ??
+          primaryApplicantInput?.lastName ??
+          primaryApplicantInput?.last_name,
+        birthDate: spouseApplicantInput?.birthDate ?? spouseApplicantInput?.birth_date ?? null,
+        gender: primaryApplicantInput?.gender ?? primaryApplicantInput?.sex ?? null,
+        maritalStatus: primaryApplicantInput?.maritalStatus ?? primaryApplicantInput?.marital_status ?? "Married",
+        address: primaryApplicantInput?.address ?? primaryApplicantInput?.street,
+        unit: primaryApplicantInput?.unit ?? null,
+        city: primaryApplicantInput?.city ?? null,
+        state: primaryApplicantInput?.state ?? null,
+        zipCode: primaryApplicantInput?.zipCode ?? primaryApplicantInput?.zip_code ?? null,
+      };
+
+      const spouseApplicantForDb = {
+        ...(primaryApplicantInput || {}),
+        ...(spouseApplicantInput || {}),
+        address: primaryApplicantInput?.address ?? primaryApplicantInput?.street,
+        unit: primaryApplicantInput?.unit ?? null,
+        city: primaryApplicantInput?.city ?? null,
+        state: primaryApplicantInput?.state ?? null,
+        zipCode: primaryApplicantInput?.zipCode ?? primaryApplicantInput?.zip_code ?? null,
+        phone: contact?.phone ?? primaryApplicantInput?.phone ?? null,
+        email:
+          spouseApplicantInput?.email ??
+          contact?.email ??
+          primaryApplicantInput?.email ??
+          primaryApplicantInput?.contact?.email ??
+          null,
+        maritalStatus: primaryApplicantInput?.maritalStatus ?? primaryApplicantInput?.marital_status ?? "Married",
+      };
+
+      const spouseXref = spouseXrefKey || spouseXrefNormalized;
+      spouseApplicantRecord = await upsertApplicantWithRelations({
+        xrefKey: spouseXref,
+        applicant: spouseApplicantForDb,
+        contact,
+        vehicles,
+        drivers: spouseDrivers,
+        coverage,
+        selectedPackage,
+        userId: effectiveUserId,
+        currentInsurance: primaryCurrentInsurance || spouseCurrentInsurance,
+        extra: { sourceApplicantId: applicantDbId, dualApplicant: true },
+      });
+
+      spouseApplicantDbId = spouseApplicantRecord?.id ?? null;
+      spouseXrefKey = spouseXref;
+    }
+
+    const primaryEzautoXml = buildEZAUTOXml({
+      applicant: primaryApplicantInput,
       vehicles,
-      drivers,
-      spouse,
+      drivers: orderedDriversForPrimary,
+      spouse: spouseApplicantInput,
       selectedPackage,
       coverage,
     });
 
+    const spouseEzautoXml =
+      shouldRunSpouse && spouseApplicantForXml
+        ? buildEZAUTOXml({
+            applicant: spouseApplicantForXml,
+            vehicles,
+            drivers: spouseDrivers,
+            spouse: primaryApplicantInput,
+            selectedPackage,
+            coverage,
+          })
+        : null;
+
     if (process.env.NODE_ENV === "development") {
-      console.log(`\n\n🟦 [${requestId}] ========== EZLYNX EZAuto XML ==========\n`);
-      console.log(prettyXml(ezautoXml));
-      console.log(`\n🟦 [${requestId}] ========================================\n`);
+      console.log(`\n\n[${requestId}] ========== EZLYNX EZAuto XML (Primary) ==========\n`);
+      console.log(prettyXml(primaryEzautoXml));
+      console.log(`\n[${requestId}] ================================================\n`);
+      if (spouseEzautoXml) {
+        console.log(`\n\n[${requestId}] ========== EZLYNX EZAuto XML (Spouse) ==========\n`);
+        console.log(prettyXml(spouseEzautoXml));
+        console.log(`\n[${requestId}] ================================================\n`);
+      }
     }
 
-    /* ===========================================================
-     * ② MOCK 模式（本地 / token 缺失 / 你现在的开发环境）
-     * =========================================================== */
     const shouldMock = forceMock || USE_MOCK || !TOKEN || !BASE;
 
     if (shouldMock) {
-      console.log(`⚠️ [${requestId}] MOCK mode enabled (no token/base)`);
-      console.log(
-        `ℹ️ [${requestId}] applicantDbId=${applicantDbId ?? "null"}, xrefKey=${xrefKey}`
-      );
+      console.log(`[${requestId}] MOCK mode enabled (no token/base)`);
+      console.log(`[${requestId}] applicantDbId=${applicantDbId ?? "null"}, xrefKey=${effectiveXrefKey}`);
 
       await sleep(500);
 
@@ -300,21 +699,15 @@ export async function POST(req: Request) {
           mode: "create",
           applicantId: "MOCK-" + Math.floor(Math.random() * 999999),
           applicantUrl: "https://mock.ezlynx.local/applicant/12345",
-          raw: { mock: true, xmlSent: ezautoXml },
+          raw: { mock: true, xmlSent: primaryEzautoXml },
         });
       }
 
       const submitXml = buildSubmitQuoteXml({
         carrierExecutions: [{ CarrierID: 13 }],
         templateId: Number(TEMPLATE_ID),
-        ezautoXml,
+        ezautoXml: primaryEzautoXml,
       });
-
-      if (process.env.NODE_ENV === "development") {
-        console.log(`\n🟧 [${requestId}] ===== MOCK SubmitQuote XML =====\n`);
-        console.log(prettyXml(submitXml));
-        console.log(`🟧 [${requestId}] ==================================\n`);
-      }
 
       let persistedExec = null;
 
@@ -322,7 +715,7 @@ export async function POST(req: Request) {
         persistedExec = await persistQuoteExecution({
           applicantId: applicantDbId,
           userId: effectiveUserId,
-          xrefKey,
+          xrefKey: effectiveXrefKey,
           submitMode,
           quotes: mockQuotes,
           raw: { mock: true, xmlSent: submitXml },
@@ -339,134 +732,197 @@ export async function POST(req: Request) {
         }
       }
 
-      return NextResponse.json({
-        success: true,
-        mode: "submitQuote",
+      let spouseResult: any = null;
+      if (shouldRunSpouse) {
+        const spouseMockQuotes = buildMockQuotes(vehicles, spouseDrivers);
+        const spouseBest = spouseMockQuotes[0];
+
+        let spouseExec = null;
+        if (saveToDb) {
+          spouseExec = await persistQuoteExecution({
+            applicantId: spouseApplicantDbId,
+            userId: effectiveUserId,
+            xrefKey: spouseXrefKey || undefined,
+            submitMode,
+            quotes: spouseMockQuotes,
+            raw: { mock: true, xmlSent: spouseEzautoXml },
+            status: "success",
+          });
+        }
+
+        spouseResult = {
+          applicantId: spouseApplicantDbId ?? "MOCK-" + Math.floor(Math.random() * 999999),
+          premium: spouseBest?.premium ?? null,
+          quoteUrl: spouseBest?.url ?? null,
+          execId: spouseExec?.quote_execution_id || null,
+          quotes: spouseMockQuotes,
+          raw: { mock: true, xmlSent: spouseEzautoXml },
+        };
+      }
+
+      const primaryResult = {
         applicantId: applicantDbId ?? "MOCK-" + Math.floor(Math.random() * 999999),
-        premium: best.premium,
-        quoteUrl: best.url,
-        quotes: mockQuotes,
+        premium: best?.premium ?? null,
+        quoteUrl: best?.url ?? null,
         execId: persistedExec?.quote_execution_id || null,
+        quotes: mockQuotes,
         raw: { mock: true, xmlSent: submitXml },
-      });
-    }
+      };
 
-    /* ===========================================================
-     * ③ 真实 EZLynx API 请求
-     * =========================================================== */
-    let url = "";
-    let xmlToSend = "";
-
-    if (submitMode === "create") {
-      url = `${BASE}/ApplicantApi/web-services/v1/applicants/auto?xrefKey=${encodeURIComponent(
-        xrefKey
-      )}`;
-      xmlToSend = ezautoXml;
-    } else {
-      xmlToSend = buildSubmitQuoteXml({
-        carrierExecutions: [{ CarrierID: 13 }],
-        templateId: Number(TEMPLATE_ID),
-        ezautoXml,
-      });
-
-      url = `${BASE}/ApplicantApi/web-services/v1/quotes/auto/submit?xrefKey=${encodeURIComponent(
-        xrefKey
-      )}`;
-    }
-
-    // ====== 打印最终发送给 EZLynx 的 XML ======
-    if (process.env.NODE_ENV === "development") {
-      console.log(
-        `\n\n📤 [${requestId}] ===== Sending to EZLynx (${submitMode}) =====`
-      );
-      console.log("URL:", url);
-      console.log("\n----- XML Sent -----\n");
-      console.log(prettyXml(xmlToSend));
-      console.log("\n---------------------\n");
-    }
-
-    /* 发送请求 */
-    const { data: xmlResponse } = await axios.post(url, xmlToSend, {
-      headers: {
-        "Content-Type": "application/xml",
-        Authorization: `Bearer ${TOKEN}`,
-      },
-    });
-
-    // ===== 解析 XML 返回 =====
-    const parser = new XMLParser({ ignoreAttributes: false });
-    const json = parser.parse(xmlResponse);
-
-    if (process.env.NODE_ENV === "development") {
-      console.log(`\n📥 [${requestId}] ===== EZLynx Response XML =====\n`);
-      console.log(prettyXml(xmlResponse));
-      console.log(`\n📥 [${requestId}] ========================================\n`);
-    }
-
-    // 返回 JSON
-    if (submitMode === "create") {
       return NextResponse.json({
         success: true,
-        mode: "create",
-        applicantId: json?.ApplicantResponse?.ApplicantId ?? null,
-        applicantUrl: json?.ApplicantResponse?.Url ?? null,
-        raw: json,
+        mode: submitMode,
+        applicantId: primaryResult.applicantId,
+        premium: primaryResult.premium,
+        quoteUrl: primaryResult.quoteUrl,
+        execId: primaryResult.execId,
+        quotes: primaryResult.quotes,
+        primary: primaryResult,
+        spouse: spouseResult,
+        raw: { mock: true },
       });
     }
 
-    // SubmitQuote
-    const appId =
-      json?.QuoteResponse?.ApplicantId ??
-      json?.ApplicantResponse?.ApplicantId ??
-      null;
+    const runEzlynxQuote = async ({
+      applicantData,
+      driversData,
+      xmlToSend,
+      xrefKeyToUse,
+      applicantDb,
+      label,
+    }: {
+      applicantData: any;
+      driversData: any[];
+      xmlToSend: string;
+      xrefKeyToUse: string;
+      applicantDb: number | null;
+      label: "primary" | "spouse";
+    }) => {
+      let url = "";
+      let xmlPayload = "";
 
-    const quote =
-      json?.QuoteResponse?.Quote ||
-      json?.QuoteResponse?.Quotes?.[0] ||
-      null;
+      if (submitMode === "create") {
+        url = `${BASE}/ApplicantApi/web-services/v1/applicants/auto?xrefKey=${encodeURIComponent(xrefKeyToUse)}`;
+        xmlPayload = xmlToSend;
+      } else {
+        xmlPayload = buildSubmitQuoteXml({
+          carrierExecutions: [{ CarrierID: 13 }],
+          templateId: Number(TEMPLATE_ID),
+          ezautoXml: xmlToSend,
+        });
 
-    const premium = quote?.Premium || quote?.TotalPremium || null;
-    const quoteUrl =
-      json?.QuoteResponse?.Url ||
-      json?.ApplicantResponse?.Url ||
-      null;
+        url = `${BASE}/ApplicantApi/web-services/v1/quotes/auto/submit?xrefKey=${encodeURIComponent(
+          xrefKeyToUse
+        )}`;
+      }
 
-    let persistedExec = null;
+      if (process.env.NODE_ENV === "development") {
+        console.log(`\n\n[${requestId}] ===== Sending to EZLynx (${label}) (${submitMode}) =====`);
+        console.log("URL:", url);
+        console.log("\n----- XML Sent -----\n");
+        console.log(prettyXml(xmlPayload));
+        console.log("\n---------------------\n");
+      }
 
-    if (saveToDb) {
-      persistedExec = await persistQuoteExecution({
-        applicantId: applicantDbId,
-        userId: effectiveUserId,
-        xrefKey: body?.xrefKey,
-        submitMode,
+      const { data: xmlResponse } = await axios.post(url, xmlPayload, {
+        headers: {
+          "Content-Type": "application/xml",
+          Authorization: `Bearer ${TOKEN}`,
+        },
+      });
+
+      const parser = new XMLParser({ ignoreAttributes: false });
+      const json = parser.parse(xmlResponse);
+
+      if (process.env.NODE_ENV === "development") {
+        console.log(`\n[${requestId}] ===== EZLynx Response XML (${label}) =====\n`);
+        console.log(prettyXml(xmlResponse));
+        console.log(`\n[${requestId}] ========================================\n`);
+      }
+
+      if (submitMode === "create") {
+        return {
+          applicantId: json?.ApplicantResponse?.ApplicantId ?? null,
+          premium: null,
+          quoteUrl: json?.ApplicantResponse?.Url ?? null,
+          execId: null,
+          quotes: [],
+          raw: json,
+        };
+      }
+
+      const appId = json?.QuoteResponse?.ApplicantId ?? json?.ApplicantResponse?.ApplicantId ?? null;
+      const quote = json?.QuoteResponse?.Quote || json?.QuoteResponse?.Quotes?.[0] || null;
+      const premium = quote?.Premium || quote?.TotalPremium || null;
+      const quoteUrl = json?.QuoteResponse?.Url || json?.ApplicantResponse?.Url || null;
+
+      let persistedExec = null;
+
+      if (saveToDb) {
+        persistedExec = await persistQuoteExecution({
+          applicantId: applicantDb,
+          userId: effectiveUserId,
+          xrefKey: xrefKeyToUse,
+          submitMode,
+          quotes: quote ? [quote] : [],
+          raw: json,
+          status: "success",
+        });
+
+        if (contact?.email && label === "primary") {
+          await sendQuoteEmail({
+            to: contact.email,
+            applicant: applicantData,
+            quotes: quote ? [quote] : [],
+            coverage,
+          });
+        }
+      }
+
+      return {
+        applicantId: appId,
+        premium,
+        quoteUrl,
+        execId: persistedExec?.quote_execution_id || null,
         quotes: quote ? [quote] : [],
         raw: json,
-        status: "success",
-      });
+      };
+    };
 
-      if (contact?.email) {
-        await sendQuoteEmail({
-          to: contact.email,
-          applicant,
-          quotes: quote ? [quote] : [],
-          coverage,
-        });
-      }
+    const primaryResult = await runEzlynxQuote({
+      applicantData: applicant,
+      driversData: drivers,
+      xmlToSend: primaryEzautoXml,
+      xrefKeyToUse: effectiveXrefKey,
+      applicantDb: applicantDbId,
+      label: "primary",
+    });
+
+    let spouseResult: any = null;
+    if (shouldRunSpouse && spouseEzautoXml) {
+      spouseResult = await runEzlynxQuote({
+        applicantData: spouseApplicantForXml,
+        driversData: spouseDrivers,
+        xmlToSend: spouseEzautoXml,
+        xrefKeyToUse: spouseXrefKey || `${effectiveXrefKey}-spouse`,
+        applicantDb: spouseApplicantDbId,
+        label: "spouse",
+      });
     }
 
     return NextResponse.json({
       success: true,
-      mode: "submitQuote",
-      applicantId: appId,
-      premium,
-      quoteUrl,
-      execId: persistedExec?.quote_execution_id || null,
-      raw: json,
+      mode: submitMode,
+      applicantId: primaryResult.applicantId,
+      premium: primaryResult.premium,
+      quoteUrl: primaryResult.quoteUrl,
+      execId: primaryResult.execId,
+      quotes: primaryResult.quotes,
+      primary: primaryResult,
+      spouse: spouseResult,
     });
   } catch (err: any) {
-    console.error(`❌ [${requestId}] EZLynx Error:`, err?.message);
-
-    console.log(`🟡 [${requestId}] Falling back to MOCK result...\n`);
+    console.error(`[${requestId}] EZLynx Error:`, err?.message);
 
     await sleep(300);
 
@@ -480,15 +936,14 @@ export async function POST(req: Request) {
       });
     }
 
-    const fallbackQuotes = buildMockQuotes(vehicles, drivers);
+    const fallbackQuotes = buildMockQuotes(requestBody?.vehicles || [], requestBody?.drivers || []);
 
     let persistedExec = null;
-
-    if (saveToDb) {
+    if (requestBody?.save && applicantDbId) {
       persistedExec = await persistQuoteExecution({
         applicantId: applicantDbId,
         userId: effectiveUserId,
-        xrefKey: body?.xrefKey,
+        xrefKey: requestBody?.xrefKey,
         submitMode,
         quotes: fallbackQuotes,
         raw: { mock: true, apiError: err?.message },
@@ -497,14 +952,52 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({
-      success: true,
-      mode: "submitQuote",
-      applicantId: "MOCK-" + Math.floor(Math.random() * 999999),
-      premium: fallbackQuotes[0].premium,
+    let spouseResult: any = null;
+    if (shouldRunSpouse) {
+      const spouseFallbackQuotes = buildMockQuotes(requestBody?.vehicles || [], spouseDrivers);
+      let spouseExec = null;
+      if (requestBody?.save && spouseApplicantDbId) {
+        spouseExec = await persistQuoteExecution({
+          applicantId: spouseApplicantDbId,
+          userId: effectiveUserId,
+          xrefKey: spouseXrefKey || undefined,
+          submitMode,
+          quotes: spouseFallbackQuotes,
+          raw: { mock: true, apiError: err?.message },
+          status: "failed",
+          error: err?.message,
+        });
+      }
+
+      spouseResult = {
+        applicantId: spouseApplicantDbId ?? "MOCK-" + Math.floor(Math.random() * 999999),
+        premium: spouseFallbackQuotes[0]?.premium ?? null,
+        quoteUrl: "https://mock.ezlynx.local/quote/ABC123",
+        execId: spouseExec?.quote_execution_id || null,
+        quotes: spouseFallbackQuotes,
+        raw: { mock: true, apiError: err?.message },
+      };
+    }
+
+    const primaryResult = {
+      applicantId: applicantDbId ?? "MOCK-" + Math.floor(Math.random() * 999999),
+      premium: fallbackQuotes[0]?.premium ?? null,
       quoteUrl: "https://mock.ezlynx.local/quote/ABC123",
       execId: persistedExec?.quote_execution_id || null,
       quotes: fallbackQuotes,
+      raw: { mock: true, apiError: err?.message },
+    };
+
+    return NextResponse.json({
+      success: true,
+      mode: submitMode,
+      applicantId: primaryResult.applicantId,
+      premium: primaryResult.premium,
+      quoteUrl: primaryResult.quoteUrl,
+      execId: primaryResult.execId,
+      quotes: primaryResult.quotes,
+      primary: primaryResult,
+      spouse: spouseResult,
       raw: { mock: true, apiError: err?.message },
     });
   }

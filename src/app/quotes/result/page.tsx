@@ -58,6 +58,34 @@ export default async function QuoteResultPage({ searchParams }: ResultPageProps)
     notFound();
   }
 
+  // Try to locate spouse execution (applicant with xref_key suffix "-spouse")
+  let spouseExecution: typeof execution | null = null;
+  const primaryXref = execution.applicant?.xref_key;
+  if (primaryXref) {
+    const spouseXref = `${primaryXref}-spouse`;
+    const spouseApplicant = await prisma.applicant.findUnique({
+      where: { xref_key: spouseXref },
+      select: { id: true },
+    });
+    if (spouseApplicant) {
+      spouseExecution = await prisma.quote_execution.findFirst({
+        where: { applicant_id: spouseApplicant.id },
+        orderBy: { created_at: "desc" },
+        include: {
+          quotes: true,
+          applicant: {
+            select: {
+              first_name: true,
+              last_name: true,
+              email: true,
+              xref_key: true,
+            },
+          },
+        },
+      });
+    }
+  }
+
   const primaryQuote = execution.quotes?.[0];
   const execIdText = execution.quote_execution_id ? String(execution.quote_execution_id) : "";
   const applicantIdText = execution.applicant_id != null ? String(execution.applicant_id) : "";
@@ -73,6 +101,18 @@ export default async function QuoteResultPage({ searchParams }: ResultPageProps)
     if (execution.applicant?.xref_key) return `/new?xref=${encodeURIComponent(execution.applicant.xref_key)}`;
     return "/new?fresh=1";
   })();
+  const spouseResumeHref = spouseExecution
+    ? (() => {
+        if (spouseExecution.applicant_id) {
+          return `/new?applicantId=${encodeURIComponent(spouseExecution.applicant_id)}${
+            spouseExecution.applicant?.xref_key ? `&xref=${encodeURIComponent(spouseExecution.applicant.xref_key)}` : ""
+          }`;
+        }
+        if (spouseExecution.applicant?.xref_key)
+          return `/new?xref=${encodeURIComponent(spouseExecution.applicant.xref_key)}`;
+        return "/new?fresh=1";
+      })()
+    : null;
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -140,6 +180,44 @@ export default async function QuoteResultPage({ searchParams }: ResultPageProps)
             )}
           </div>
         </section>
+
+        {spouseExecution && (
+          <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Quotes (Spouse)</h2>
+              {spouseResumeHref && (
+                <a
+                  href={spouseResumeHref}
+                  className="rounded-lg bg-[#1EC8C8] px-4 py-2 text-sm font-semibold text-white shadow hover:bg-[#19b3b3]"
+                >
+                  Re-open &amp; Edit
+                </a>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {spouseExecution.quotes?.map((q) => {
+                const premiumText = q.premium != null ? `$${q.premium.toString?.() || String(q.premium)}` : "N/A";
+                const deductibleText =
+                  q.deductible != null
+                    ? typeof q.deductible === "string" || typeof q.deductible === "number"
+                      ? String(q.deductible)
+                      : JSON.stringify(q.deductible)
+                    : null;
+                return (
+                  <div key={q.id} className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">
+                    <div className="text-base font-semibold text-gray-900">{q.carrier_name || "Carrier"}</div>
+                    <div className="mt-1 text-lg font-bold text-gray-900">{premiumText}</div>
+                    {q.term && <div className="text-xs text-gray-600">Term: {q.term}</div>}
+                    {deductibleText && <div className="text-xs text-gray-600">Deductible: {deductibleText}</div>}
+                  </div>
+                );
+              })}
+              {(!spouseExecution.quotes || spouseExecution.quotes.length === 0) && (
+                <div className="text-sm text-gray-600">No spouse quote details saved.</div>
+              )}
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );

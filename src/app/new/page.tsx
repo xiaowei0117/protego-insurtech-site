@@ -117,7 +117,7 @@ function mapApplicantToForm(applicant: any): FormData {
   const coverageRow = applicant.coverage_configs || {};
   const rawCoverage = coverageRow?.extra?.rawCoverage || {};
 
-  const drivers =
+  const rawDrivers =
     applicant.drivers?.length > 0
       ? applicant.drivers.map((d: any) => ({
           firstName: d.first_name || "",
@@ -128,8 +128,8 @@ function mapApplicantToForm(applicant: any): FormData {
           occupation: d.occupation || "",
           education: d.education || "",
           dlNumber: d.dl_number || "",
-            dlState: d.dl_state || "",
-          }))
+          dlState: d.dl_state || "",
+        }))
       : [
           {
             firstName: "",
@@ -143,6 +143,15 @@ function mapApplicantToForm(applicant: any): FormData {
             dlState: "",
           },
         ];
+
+  // Ensure driver ordering: primary Self first, spouse second, others after
+  const primaryDriver =
+    rawDrivers.find((d) => d.relationship === "Self") || rawDrivers[0];
+  const spouseDriverRel = rawDrivers.find((d) => d.relationship === "Spouse");
+  const otherDrivers = rawDrivers.filter(
+    (d) => d !== primaryDriver && d !== spouseDriverRel
+  );
+  const drivers = [primaryDriver, ...(spouseDriverRel ? [spouseDriverRel] : []), ...otherDrivers];
 
   const spouseDriver =
     applicant.marital_status === "Married"
@@ -525,6 +534,7 @@ export default function NewQuotePage() {
   const [applicantId, setApplicantId] = useState<number | null>(null);
   const [xrefKey, setXrefKey] = useState<string | null>(null);
   const [isReopen, setIsReopen] = useState(false);
+  const [dualApplicantQuotes, setDualApplicantQuotes] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [lastQuotePayload, setLastQuotePayload] = useState<any | null>(null);
   const [savingQuote, setSavingQuote] = useState(false);
@@ -912,10 +922,25 @@ export default function NewQuotePage() {
         }
       }
 
+      const spousePayload =
+        dualApplicantQuotes && form.maritalStatus === "Married"
+          ? {
+              firstName: form.spouseFirstName,
+              lastName: form.spouseLastName,
+              birthDate: form.spouseBirthDate,
+              occupation: form.spouseOccupation,
+              education: form.spouseEducation,
+              phone: form.contact.phone,
+              email: form.contact.email,
+            }
+          : null;
+
       const payload = {
         submitMode,
         xrefKey: useXrefKey,
         applicantId: form.applicantId || applicantId || null,
+        dualApplicantQuotes,
+        spouse: spousePayload,
         applicant: {
           firstName: form.firstName,
           lastName: form.lastName,
@@ -927,6 +952,7 @@ export default function NewQuotePage() {
           zipCode: form.zipCode,
           gender: form.gender,
           maritalStatus: form.maritalStatus,
+          residence: form.residence,
         },
 
         vehicles: form.cars.map((car) => ({
@@ -934,31 +960,27 @@ export default function NewQuotePage() {
           year: car.year,
           make: car.make,
           model: car.model,
+          subModel: car.subModel,
           ownership: car.ownership,
           usage: car.usage,
           mileage: car.mileage,
         })),
 
-        drivers: form.drivers.map((driver) => ({
+        drivers: form.drivers.map((driver, idx) => ({
           firstName: driver.firstName,
           lastName: driver.lastName,
           birthDate: driver.birthDate,
           relationship: driver.relationship,
           maritalStatus: driver.maritalStatus,
+          occupation:
+            driver.occupation ||
+            (idx === 0 ? form.occupation : idx === 1 ? form.spouseOccupation : ""),
+          education:
+            driver.education ||
+            (idx === 0 ? form.education : idx === 1 ? form.spouseEducation : ""),
           dlNumber: driver.dlNumber || "",
           dlState: driver.dlState || "",
         })),
-
-        spouse:
-          form.maritalStatus === "Married"
-            ? {
-                firstName: form.spouseFirstName,
-                lastName: form.spouseLastName,
-                birthDate: form.spouseBirthDate,
-                education: form.spouseEducation,
-                occupation: form.spouseOccupation,
-              }
-            : null,
 
         contact: {
           phone: form.contact.phone || "",
@@ -1199,6 +1221,8 @@ export default function NewQuotePage() {
             canSave={Boolean(lastQuotePayload)}
             saveMessage={saveMessage}
             isReopen={isReopen}
+            dualApplicantQuotes={dualApplicantQuotes}
+            setDualApplicantQuotes={setDualApplicantQuotes}
           />
         )}
       </section>

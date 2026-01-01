@@ -32,22 +32,52 @@ export default async function AgentHomePage() {
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/* Left: Agent tools */}
           <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-gray-500">New Quotes</p>
-            <div className="mt-1 text-2xl font-semibold text-gray-900">
-              <a
-                href="/agent/quotes"
-                className="text-[#1EC8C8] underline decoration-2 underline-offset-4 hover:text-[#19b3b3]"
-              >
-                {newQuoteCount}
-              </a>
+            <p className="text-xs uppercase tracking-wide text-gray-500">Agent Tools</p>
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">Carrier Assistant</div>
+                  <div className="text-xs text-gray-600">
+                    Ask eligibility/coverage questions with citations.
+                  </div>
+                </div>
+                <a
+                  href="/agent/carrier-assistant"
+                  className="inline-flex items-center justify-center rounded-lg bg-[#1EC8C8] px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-[#19b3b3]"
+                >
+                  Open
+                </a>
+              </div>
+              {/* Add more tools here as they are built */}
             </div>
-            <p className="text-sm text-gray-600">View and manage new quote submissions.</p>
           </div>
+
+          {/* Right: Work items */}
           <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Renewals</p>
-            <div className="mt-1 text-2xl font-semibold text-gray-900">{renewalCount}</div>
-            <p className="text-sm text-gray-600">Renewal policies and follow-ups.</p>
+            <p className="text-xs uppercase tracking-wide text-gray-500">Work Items</p>
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">New Quotes</div>
+                  <div className="text-xs text-gray-600">View and manage new quote submissions.</div>
+                </div>
+                <a
+                  href="/agent/quotes"
+                  className="text-lg font-semibold text-[#1EC8C8] underline decoration-2 underline-offset-4 hover:text-[#19b3b3]"
+                >
+                  {newQuoteCount}
+                </a>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">Renewals</div>
+                  <div className="text-xs text-gray-600">Renewal policies and follow-ups.</div>
+                </div>
+                <span className="text-lg font-semibold text-gray-900">{renewalCount}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

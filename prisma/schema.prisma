@@ -297,3 +297,39 @@ model audit_log {
 
   @@map("audit_logs")
 }
+
+////  -----------------------------
+////   RAG documents & chunks
+////  -----------------------------
+model Document {
+  id         String   @id @default(uuid())
+  carrier    String
+  lob        String
+  state      String
+  program    String?
+  version    String?
+  docName    String?
+  sourcePath String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+
+  chunks Chunk[]
+}
+
+model Chunk {
+  id        String   @id @default(uuid())
+  doc       Document @relation(fields: [docId], references: [id], onDelete: Cascade)
+  docId     String
+  carrier   String
+  lob       String
+  state     String
+  program   String?
+  version   String?
+  page      String?
+  chunk     String
+  embedding Unsupported("vector") // set dimension via migration SQL, e.g., vector(768)
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([carrier, lob, state, program, version])
+}

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 type Source = { doc: string; page: string; snippet: string };
-type Retrieved = { id: string; text: string };
+type Retrieved = { id: string; text: string; score?: number };
 
 const carriers = ["Wellington", "Carrier A", "Carrier B"];
 const lobs = ["HO", "DF", "Wind"];
@@ -231,7 +231,10 @@ export default function CarrierAssistantPage() {
               <div className="mt-2 space-y-2 text-sm text-gray-700">
                 {retrieved.map((r) => (
                   <div key={r.id} className="rounded border border-gray-200 bg-white p-2">
-                    <div className="text-xs text-gray-500">[{r.id}]</div>
+                    <div className="flex items-center justify-between text-xs text-gray-500">
+                      <span>[{r.id}]</span>
+                      <span>{r.score === undefined ? "score: n/a" : `score: ${r.score.toFixed(4)}`}</span>
+                    </div>
                     <div className="text-gray-800">{r.text}</div>
                   </div>
                 ))}

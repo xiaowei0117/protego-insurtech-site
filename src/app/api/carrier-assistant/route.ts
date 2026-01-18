@@ -7,6 +7,26 @@ const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 const EMB_MODEL = process.env.EMBEDDING_MODEL || "nomic-embed-text"; // 768-dim default
 const LLM_MODEL = process.env.LLM_MODEL || "llama3.1:8b";
 const TOP_K = Number(process.env.CARRIER_ASSISTANT_TOP_K || 5);
+const RERANK_ALPHA = Number(process.env.CARRIER_ASSISTANT_RERANK_ALPHA || 0.02);
+
+function tokenize(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function keywordOverlapScore(query: string, doc: string) {
+  const q = new Set(tokenize(query));
+  if (!q.size) return 0;
+  let hits = 0;
+  for (const t of tokenize(doc)) {
+    if (q.has(t)) hits += 1;
+  }
+  return hits;
+}
 
 type RetrievedChunk = {
   id: string;
@@ -115,17 +135,27 @@ export async function POST(req: Request) {
       topK: TOP_K,
     });
 
-    // 3) Build context for LLM
-    const context = retrieved
+    // 3) Simple rerank: add keyword overlap to vector score
+    const reranked = [...retrieved].sort((a, b) => {
+      const aScore = a.score + RERANK_ALPHA * keywordOverlapScore(question, a.chunk);
+      const bScore = b.score + RERANK_ALPHA * keywordOverlapScore(question, b.chunk);
+      return bScore - aScore;
+    });
+
+    // 4) Build context for LLM
+    const context = reranked
       .map(
         (r, idx) =>
           `[#${idx + 1} ${r.docname || r.docid}${r.page ? ` p.${r.page}` : ""}] ${r.chunk}`
       )
       .join("\n\n");
 
-    // 4) Call LLM for structured answer
+    // 5) Call LLM for structured answer
     const prompt = `
-You are a carrier eligibility assistant. Use the provided context to answer briefly.
+You are a carrier eligibility assistant. You must ONLY use facts explicitly present in the Context.
+If the Context does not contain the answer, respond with "Refer" and explain that the information is not found.
+Do not add or infer any details not in the Context. Keep wording close to the source text.
+
 Question: ${question}
 
 Context:
@@ -133,8 +163,8 @@ ${context || "N/A"}
 
 Respond with:
 - Answer: Yes/No/Refer
-- Conditions: bullet points if applicable
-- Include inline citations using [#n doc p.page] from the context when relevant.
+- Conditions: bullet points copied or tightly paraphrased from Context only
+- Include inline citations using [#n doc p.page] for every factual statement.
 `.trim();
 
     // 4) Call Ollama LLM
@@ -160,14 +190,14 @@ Respond with:
       ? "No"
       : "Refer";
 
-    const sources = retrieved.map((r, idx) => ({
+    const sources = reranked.map((r, idx) => ({
       doc: r.docname || r.docid,
       page: r.page ? `p.${r.page}` : "",
       snippet: r.chunk.slice(0, 160) + (r.chunk.length > 160 ? "..." : ""),
       tag: `#${idx + 1}`,
     }));
 
-    const retrievedForDebug: RetrievedChunk[] = retrieved.map((r) => ({
+    const retrievedForDebug: RetrievedChunk[] = reranked.map((r) => ({
       id: r.id,
       text: r.chunk,
       doc: r.docname || r.docid,

@@ -1,9 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-
-type Source = { doc: string; page: string; snippet: string };
-type Retrieved = { id: string; text: string; score?: number };
+import { useCarrierAssistant } from "@/hooks/useCarrierAssistant";
 
 const carriers = ["Wellington", "Carrier A", "Carrier B"];
 const lobs = ["HO", "DF", "Wind"];
@@ -18,11 +16,7 @@ export default function CarrierAssistantPage() {
   const [program, setProgram] = useState<string | "">("");
   const [version, setVersion] = useState(versions[0]);
   const [question, setQuestion] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [answer, setAnswer] = useState<string | null>(null);
-  const [conditions, setConditions] = useState<string | null>(null);
-  const [sources, setSources] = useState<Source[]>([]);
-  const [retrieved, setRetrieved] = useState<Retrieved[]>([]);
+  const { ask, loading, answer, conditions, sources, retrieved } = useCarrierAssistant();
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [feedbackReason, setFeedbackReason] = useState<string>("");
 
@@ -30,42 +24,17 @@ export default function CarrierAssistantPage() {
 
   async function handleAsk() {
     if (!question.trim()) return;
-    setLoading(true);
     setFeedback(null);
     setFeedbackReason("");
 
-    try {
-      const res = await fetch("/api/carrier-assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          carrier,
-          lob,
-          state: stateVal,
-          program,
-          version,
-          question,
-        }),
-      });
-
-      if (!res.ok) {
-        const msg = await res.json().catch(() => ({}));
-        throw new Error(msg?.error || "Request failed");
-      }
-
-      const data = await res.json();
-      setAnswer(data.answer || null);
-      setConditions(data.conditions || null);
-      setSources(data.sources || []);
-      setRetrieved(data.retrieved || []);
-    } catch (err: any) {
-      setAnswer("Refer");
-      setConditions(err?.message || "Unable to fetch answer. Please try again.");
-      setSources([]);
-      setRetrieved([]);
-    } finally {
-      setLoading(false);
-    }
+    await ask({
+      carrier,
+      lob,
+      state: stateVal,
+      program,
+      version,
+      question,
+    });
   }
 
   function handleFeedback(vote: "up" | "down") {

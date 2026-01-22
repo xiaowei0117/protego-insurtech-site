@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import type { FormData } from "@/types/formData";
 
 interface StepCoverageProps {
@@ -38,11 +38,18 @@ export default function StepCoverage({
 }: StepCoverageProps) {
   const primaryResult = result?.primary ?? result ?? null;
   const spouseResult = result?.spouse ?? null;
+  const isMarried = form.maritalStatus === "Married" || form.married;
 
   const quotesPrimary = (primaryResult?.quotes as any[]) || [];
   const primaryPremium = primaryResult?.premium || quotesPrimary?.[0]?.premium || null;
   const quotesSpouse = (spouseResult?.quotes as any[]) || [];
   const spousePremium = spouseResult?.premium || quotesSpouse?.[0]?.premium || null;
+
+  useEffect(() => {
+    if (!isMarried && dualApplicantQuotes) {
+      setDualApplicantQuotes(false);
+    }
+  }, [isMarried, dualApplicantQuotes, setDualApplicantQuotes]);
 
   const coverageFieldConfigs: {
     key: keyof FormData["coverage"];
@@ -198,15 +205,17 @@ export default function StepCoverage({
           >
             {loading ? "Getting quotes..." : "Get Quote"}
           </button>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-gray-300 text-[#1EC8C8] focus:ring-[#1EC8C8]"
-              checked={dualApplicantQuotes}
-              onChange={(e) => setDualApplicantQuotes(e.target.checked)}
-            />
-            Get 2 quotes using husband and wife as applicant
-          </label>
+          {isMarried && (
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300 text-[#1EC8C8] focus:ring-[#1EC8C8]"
+                checked={dualApplicantQuotes}
+                onChange={(e) => setDualApplicantQuotes(e.target.checked)}
+              />
+              Get 2 quotes using husband and wife as applicant
+            </label>
+          )}
         </div>
 
         {error && (

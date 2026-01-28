@@ -3,11 +3,11 @@
 import { useMemo, useState } from "react";
 import { useCarrierAssistant } from "@/hooks/useCarrierAssistant";
 
-const carriers = ["Wellington", "Carrier A", "Carrier B"];
-const lobs = ["HO", "DF", "Wind"];
+const carriers = ["Wellington", "Progressive", "Carrier B"];
+const lobs = ["HO", "DF", "HO3"];
 const states = ["TX", "FL", "CA"];
 const programs = ["STD", "SEL", "Coastal"];
-const versions = ["Latest", "2025-01-01", "2024-10-01"];
+const versions = ["Latest", "v2025", "v2026"];
 
 export default function CarrierAssistantPage() {
   const [carrier, setCarrier] = useState(carriers[0]);

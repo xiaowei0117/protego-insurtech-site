@@ -14,6 +14,14 @@ const EMB_MODEL = process.env.EMBEDDING_MODEL || "nomic-embed-text"; // 768-dim 
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
 const require = createRequire(import.meta.url);
+const argv = process.argv.slice(2);
+const carrierFilter = (() => {
+  const direct = argv.find((a) => a.startsWith("--carrier="));
+  if (direct) return direct.split("=").slice(1).join("=") || "";
+  const idx = argv.indexOf("--carrier");
+  if (idx >= 0) return argv[idx + 1] || "";
+  return "";
+})();
 
 function walkFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -65,12 +73,34 @@ async function readDoc(filePath: string): Promise<string> {
   return readFileSync(filePath, "utf8");
 }
 
+function fileHash(filePath: string) {
+  const buf = readFileSync(filePath);
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
 async function ingestFile(filePath: string) {
   // Expect folder layout: DOCS_ROOT/carrier/lob/state/version/filename.*
   const rel = path.relative(DOCS_ROOT, filePath);
   const parts = rel.split(path.sep);
   const [carrier = "Unknown", lob = "Unknown", state = "Unknown", version = "Unknown"] = parts;
   const docName = parts.at(-1) || path.basename(filePath);
+
+  const hash = fileHash(filePath);
+  const existingDocs = await prisma.document.findMany({
+    where: { sourcePath: filePath },
+    select: { id: true, meta: true },
+  });
+  if (existingDocs.length) {
+    const hasSameHash = existingDocs.some((doc) => {
+      const meta = doc.meta as any;
+      return meta && typeof meta === "object" && meta.hash === hash;
+    });
+    if (hasSameHash) {
+      console.log(`Skip unchanged ${docName}`);
+      return;
+    }
+    await prisma.document.deleteMany({ where: { sourcePath: filePath } });
+  }
 
   const content = await readDoc(filePath);
   const chunks = chunkText(content);
@@ -84,6 +114,7 @@ async function ingestFile(filePath: string) {
       version,
       docName,
       sourcePath: filePath,
+      meta: { hash },
     },
   });
 
@@ -124,12 +155,27 @@ async function main() {
     const lower = f.toLowerCase();
     return lower.endsWith(".txt") || lower.endsWith(".pdf");
   });
-  if (!files.length) {
-    console.warn(`No .txt or .pdf files found under ${DOCS_ROOT}`);
+  const filtered = carrierFilter
+    ? files.filter((f) => {
+        const rel = path.relative(DOCS_ROOT, f);
+        const parts = rel.split(path.sep);
+        const carrier = parts[0] || "";
+        return carrier.toLowerCase() === carrierFilter.toLowerCase();
+      })
+    : files;
+  if (!filtered.length) {
+    const msg = carrierFilter
+      ? `No .txt or .pdf files found for carrier "${carrierFilter}" under ${DOCS_ROOT}`
+      : `No .txt or .pdf files found under ${DOCS_ROOT}`;
+    console.warn(msg);
     return;
   }
 
-  for (const file of files) {
+  if (carrierFilter) {
+    console.log(`Carrier filter: ${carrierFilter}`);
+  }
+
+  for (const file of filtered) {
     await ingestFile(file);
   }
 }

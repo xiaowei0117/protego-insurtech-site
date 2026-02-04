@@ -8,6 +8,7 @@ import StepCars from "@/app/new/steps/StepCars";
 import StepDrivers from "@/app/new/steps/StepDrivers";
 import StepPriorIns from "@/app/new/steps/StepPriorIns";
 import StepCoverage from "@/app/new/steps/StepCoverage";
+import SmartQuoteAssistantPanel from "@/app/new/SmartQuoteAssistantPanel";
 
 import { validateZip } from "@/utils/geo";
 
@@ -1136,7 +1137,8 @@ export default function NewQuotePage() {
       </aside>
 
       {/* 右侧表单区域 */}
-      <section className="flex-1 p-8">
+      <div className="flex flex-1 gap-6 p-8">
+        <section className="min-w-0 flex-1">
         {/* ===== Step 1: Applicant Information ===== */}
         {step === 1 && (
           <StepApplicant
@@ -1225,7 +1227,14 @@ export default function NewQuotePage() {
             setDualApplicantQuotes={setDualApplicantQuotes}
           />
         )}
-      </section>
+        </section>
+
+        <SmartQuoteAssistantPanel
+          step={step}
+          stepsLength={steps.length}
+          form={form}
+        />
+      </div>
     </main>
   );
 }

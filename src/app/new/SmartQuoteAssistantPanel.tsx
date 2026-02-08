@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormData } from "@/types/formData";
 
 type Props = {
@@ -13,6 +13,36 @@ export default function SmartQuoteAssistantPanel({ step, stepsLength, form }: Pr
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState<string | null>(null);
   const [assistantResult, setAssistantResult] = useState<any | null>(null);
+  const [chatMessages, setChatMessages] = useState<
+    Array<{ role: "user" | "assistant"; content: string }>
+  >([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatStorageKey = "autoQuoteAssistantChat";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(chatStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setChatMessages(parsed);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(chatStorageKey, JSON.stringify(chatMessages));
+    } catch {
+      // ignore storage errors
+    }
+  }, [chatMessages]);
 
   async function runQuoteAssistant(
     intent: "missing_info" | "explain_price" | "recommend_coverage"
@@ -55,6 +85,58 @@ export default function SmartQuoteAssistantPanel({ step, stepsLength, form }: Pr
     }
   }
 
+  async function sendChat() {
+    const question = chatInput.trim();
+    if (!question || chatLoading) return;
+    const nextMessages = [...chatMessages, { role: "user", content: question }];
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setChatLoading(true);
+    try {
+      const res = await fetch("/api/auto-quote-assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          intent: "general",
+          question,
+          messages: nextMessages,
+          form: {
+            applicant: {
+              firstName: form.firstName,
+              lastName: form.lastName,
+              address: form.address,
+              city: form.city,
+              state: form.state,
+              zipCode: form.zipCode,
+            },
+            cars: form.cars,
+            drivers: form.drivers,
+            currentInsurance: form.currentInsurance,
+            contact: form.contact,
+            selectedPackage: form.selectedPackage,
+            coverage: form.coverage,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Assistant request failed");
+      }
+      const reply = data?.llm || data?.answer || "Thanks for your question.";
+      setChatMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    } catch (err: any) {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: err?.message || "Sorry, I could not answer that.",
+        },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
   return (
     <aside className="hidden w-80 shrink-0 lg:block">
       <div className="sticky top-6 space-y-4">
@@ -77,7 +159,7 @@ export default function SmartQuoteAssistantPanel({ step, stepsLength, form }: Pr
               type="button"
               onClick={() => runQuoteAssistant("missing_info")}
               disabled={assistantLoading}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {assistantLoading ? "Thinking..." : "Review missing info"}
             </button>
@@ -85,7 +167,7 @@ export default function SmartQuoteAssistantPanel({ step, stepsLength, form }: Pr
               type="button"
               onClick={() => runQuoteAssistant("explain_price")}
               disabled={assistantLoading}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {assistantLoading ? "Thinking..." : "Why is my quote higher?"}
             </button>
@@ -130,6 +212,62 @@ export default function SmartQuoteAssistantPanel({ step, stepsLength, form }: Pr
               )}
             </div>
           )}
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-gray-900">
+              Ask a question
+            </h4>
+            <button
+              type="button"
+              onClick={() => setChatMessages([])}
+              className="text-xs font-medium text-gray-500 hover:text-gray-700"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="mt-3 max-h-52 space-y-2 overflow-y-auto rounded-lg bg-gray-50 p-3 text-sm text-gray-700">
+            {chatMessages.length === 0 && (
+              <p className="text-xs text-gray-500">
+                Ask about pricing, coverage, or what to fill in next.
+              </p>
+            )}
+            {chatMessages.map((m, idx) => (
+              <div
+                key={`${m.role}-${idx}`}
+                className={`rounded-lg px-3 py-2 ${
+                  m.role === "user"
+                    ? "bg-white text-gray-800"
+                    : "bg-emerald-50 text-emerald-900"
+                }`}
+              >
+                {m.content}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  sendChat();
+                }
+              }}
+              placeholder="Type your question..."
+              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400"
+            />
+            <button
+              type="button"
+              onClick={sendChat}
+              disabled={chatLoading}
+              className="rounded-lg bg-[#1EC8C8] px-3 py-2 text-sm font-medium text-white hover:bg-[#19b3b3] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {chatLoading ? "..." : "Send"}
+            </button>
+          </div>
         </div>
 
         <div className="rounded-2xl border bg-white p-5 shadow-sm">

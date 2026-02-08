@@ -20,6 +20,7 @@ type CoverageInput = Record<string, string | number | null | undefined>;
 type AutoQuoteAssistantPayload = {
   intent?: "missing_info" | "explain_price" | "recommend_coverage" | "general";
   question?: string;
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
   form?: {
     applicant?: {
       firstName?: string;
@@ -178,8 +179,14 @@ async function maybeCallLlm(payload: {
   summary: string;
   missing: string[];
   tips: string[];
+  messages?: Array<{ role: "user" | "assistant"; content: string }>;
 }) {
-  if (!USE_LLM) return null;
+  // Keep missing-info deterministic and fast: do not call LLM for this intent.
+  if (!USE_LLM || payload.intent === "missing_info") return null;
+  const history = (payload.messages || [])
+    .slice(-6)
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+    .join("\n");
   const prompt = `
 You are an auto insurance quote assistant. Be concise and helpful.
 Use the provided context. If key info is missing, ask for it.
@@ -189,6 +196,8 @@ Question: ${payload.question || "N/A"}
 Context summary: ${payload.summary || "N/A"}
 Missing fields: ${payload.missing.join(", ") || "None"}
 Price factors: ${payload.tips.join(" ") || "None"}
+Conversation so far:
+${history || "N/A"}
 
 Reply with:
 - Answer: one short paragraph
@@ -249,6 +258,7 @@ export async function POST(req: Request) {
       summary,
       missing,
       tips: priceTips,
+      messages: body.messages,
     });
 
     return NextResponse.json({

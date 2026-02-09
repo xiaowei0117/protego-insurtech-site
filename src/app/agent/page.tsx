@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { mockRenewals } from "./renewals/mockRenewals";
 
 export default async function AgentHomePage() {
   const session = await getServerSession(authOptions as any);
@@ -20,7 +21,7 @@ export default async function AgentHomePage() {
     distinct: ["applicant_id"],
   });
   const newQuoteCount = distinctApplicants.length;
-  const renewalCount = 0;
+  const renewalCount = mockRenewals.length;
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -75,7 +76,12 @@ export default async function AgentHomePage() {
                   <div className="text-sm font-semibold text-gray-900">Renewals</div>
                   <div className="text-xs text-gray-600">Renewal policies and follow-ups.</div>
                 </div>
-                <span className="text-lg font-semibold text-gray-900">{renewalCount}</span>
+                <a
+                  href="/agent/renewals"
+                  className="text-lg font-semibold text-[#1EC8C8] underline decoration-2 underline-offset-4 hover:text-[#19b3b3]"
+                >
+                  {renewalCount}
+                </a>
               </div>
             </div>
           </div>

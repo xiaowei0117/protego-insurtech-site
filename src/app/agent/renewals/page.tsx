@@ -2,7 +2,14 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import Link from "next/link";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import { mockRenewals } from "./mockRenewals";
+import prisma from "@/lib/prisma";
+
+function formatDate(value?: Date | string | null) {
+  if (!value) return "";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
 
 export default async function AgentRenewalsListPage() {
   const session = await getServerSession(authOptions as any);
@@ -11,6 +18,10 @@ export default async function AgentRenewalsListPage() {
   if (role !== "agent") {
     redirect("/agent/login");
   }
+
+  const renewals = await prisma.renewal_policy.findMany({
+    orderBy: { expiration_date: "asc" },
+  });
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -42,14 +53,14 @@ export default async function AgentRenewalsListPage() {
             <div className="col-span-1 text-right">Premium</div>
           </div>
           <div className="divide-y divide-gray-100">
-            {mockRenewals.map((r) => (
+            {renewals.map((r) => (
               <div key={r.id} className="grid grid-cols-[repeat(12,minmax(0,1fr))] px-4 py-3 text-sm text-gray-800">
                 <div className="col-span-1 font-semibold text-gray-900">
                   <Link
                     href={`/agent/renewals/${r.id}`}
                     className="text-[#1EC8C8] underline hover:text-[#19b3b3]"
                   >
-                    {r.itemNumber}
+                    {r.id}
                   </Link>
                 </div>
                 <div className="col-span-2 font-semibold text-gray-900">
@@ -57,21 +68,23 @@ export default async function AgentRenewalsListPage() {
                     href={`/agent/renewals/${r.id}`}
                     className="text-[#1EC8C8] underline hover:text-[#19b3b3]"
                   >
-                    {r.policyNumber}
+                    {r.policy_number}
                   </Link>
                 </div>
                 <div className="col-span-2">
-                  {r.firstName} {r.lastName}
+                  {r.first_name} {r.last_name}
                 </div>
-                <div className="col-span-2 text-gray-700">{r.expirationDate}</div>
-                <div className="col-span-2 text-gray-700">{r.lineOfBusiness}</div>
-                <div className="col-span-2 text-gray-700">{r.writingCarrier}</div>
+                <div className="col-span-2 text-gray-700">
+                  {formatDate(r.expiration_date)}
+                </div>
+                <div className="col-span-2 text-gray-700">{r.line_of_business}</div>
+                <div className="col-span-2 text-gray-700">{r.writing_carrier}</div>
                 <div className="col-span-1 text-right font-semibold text-gray-900">
-                  ${r.policyPremium.toLocaleString()}
+                  {r.policy_premium ? `$${Number(r.policy_premium).toLocaleString()}` : ""}
                 </div>
               </div>
             ))}
-            {mockRenewals.length === 0 && (
+            {renewals.length === 0 && (
               <div className="px-4 py-6 text-sm text-gray-600">No renewals to follow up.</div>
             )}
           </div>

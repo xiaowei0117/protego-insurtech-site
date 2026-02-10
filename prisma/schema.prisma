@@ -299,6 +299,31 @@ model audit_log {
 }
 
 ////  -----------------------------
+////   renewal policies (imports)
+////  -----------------------------
+
+model renewal_policy {
+  id               Int      @id @default(autoincrement())
+  first_name       String?
+  last_name        String?
+  policy_number    String
+  expiration_date  DateTime?
+  line_of_business String?
+  writing_carrier  String?
+  policy_premium   Decimal? @db.Decimal(12, 2)
+  renewal_premium  Decimal? @db.Decimal(12, 2)
+  agent_name       String?
+  csr_name         String?
+  source_file      String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@unique([policy_number, expiration_date, line_of_business, writing_carrier])
+  @@map("renewal_policies")
+}
+
+////  -----------------------------
 ////   RAG documents & chunks
 ////  -----------------------------
 model Document {

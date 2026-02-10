@@ -1,8 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import type { RenewalPolicy } from "../mockRenewals";
-
 type ComparisonResult = {
   oldVsRenewal: string[];
   renewalVsOtherQuotes: string[];
@@ -10,7 +8,16 @@ type ComparisonResult = {
 };
 
 type Props = {
-  policy: RenewalPolicy;
+  policy: {
+    id: number;
+    policyNumber: string;
+    firstName: string | null;
+    lastName: string | null;
+    expirationDate: string | null;
+    lineOfBusiness: string | null;
+    writingCarrier: string | null;
+    policyPremium: number | null;
+  };
 };
 
 export default function RenewalWorkflowClient({ policy }: Props) {
@@ -37,13 +44,16 @@ export default function RenewalWorkflowClient({ policy }: Props) {
     otherQuotes.forEach((file) => formData.append("otherQuotes", file));
 
     formData.append("policyNumber", policy.policyNumber);
-    formData.append("itemNumber", policy.itemNumber);
-    formData.append("firstName", policy.firstName);
-    formData.append("lastName", policy.lastName);
-    formData.append("expirationDate", policy.expirationDate);
-    formData.append("lineOfBusiness", policy.lineOfBusiness);
-    formData.append("writingCarrier", policy.writingCarrier);
-    formData.append("policyPremium", policy.policyPremium.toString());
+    formData.append("itemNumber", policy.id.toString());
+    formData.append("firstName", policy.firstName || "");
+    formData.append("lastName", policy.lastName || "");
+    formData.append("expirationDate", policy.expirationDate || "");
+    formData.append("lineOfBusiness", policy.lineOfBusiness || "");
+    formData.append("writingCarrier", policy.writingCarrier || "");
+    formData.append(
+      "policyPremium",
+      policy.policyPremium === null ? "" : policy.policyPremium.toString()
+    );
 
     setLoading(true);
     try {

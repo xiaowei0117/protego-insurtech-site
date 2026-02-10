@@ -1,14 +1,22 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
-import { mockRenewals } from "../mockRenewals";
+import prisma from "@/lib/prisma";
 import RenewalWorkflowClient from "./RenewalWorkflowClient";
 
-type Params = {
-  params: { id: string };
-};
+function formatDate(value?: Date | string | null) {
+  if (!value) return "";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
 
-export default async function AgentRenewalDetailPage({ params }: Params) {
+export default async function AgentRenewalDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id: rawId } = await params;
   const session = await getServerSession(authOptions as any);
   const role = (session as any)?.user?.role;
 
@@ -16,11 +24,31 @@ export default async function AgentRenewalDetailPage({ params }: Params) {
     redirect("/agent/login");
   }
 
-  const policy = mockRenewals.find((r) => r.id === params.id);
+  const id = Number(rawId);
+  if (!Number.isFinite(id)) {
+    redirect("/agent/renewals");
+  }
+
+  const policy = await prisma.renewal_policy.findUnique({
+    where: { id },
+  });
 
   if (!policy) {
     redirect("/agent/renewals");
   }
+
+  const policyForClient = {
+    id: policy.id,
+    policyNumber: policy.policy_number,
+    firstName: policy.first_name,
+    lastName: policy.last_name,
+    expirationDate: policy.expiration_date
+      ? policy.expiration_date.toISOString().slice(0, 10)
+      : null,
+    lineOfBusiness: policy.line_of_business,
+    writingCarrier: policy.writing_carrier,
+    policyPremium: policy.policy_premium ? Number(policy.policy_premium) : null,
+  };
 
   return (
     <main className="min-h-screen bg-gray-50 text-gray-900">
@@ -30,7 +58,7 @@ export default async function AgentRenewalDetailPage({ params }: Params) {
             <p className="text-xs uppercase tracking-wide text-[#0b6f6f]">Agent Portal</p>
             <h1 className="text-3xl font-semibold">Renewal Review</h1>
             <p className="text-sm text-gray-600">
-              Policy {policy.policyNumber} · Item {policy.itemNumber}
+              Policy {policy.policy_number} · Item {policy.id}
             </p>
           </div>
           <a
@@ -46,31 +74,33 @@ export default async function AgentRenewalDetailPage({ params }: Params) {
             <div>
               <p className="text-xs uppercase text-gray-500">Insured</p>
               <p className="text-lg font-semibold text-gray-900">
-                {policy.firstName} {policy.lastName}
+                {policy.first_name} {policy.last_name}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase text-gray-500">Expiration</p>
-              <p className="text-lg font-semibold text-gray-900">{policy.expirationDate}</p>
+              <p className="text-lg font-semibold text-gray-900">
+                {formatDate(policy.expiration_date)}
+              </p>
             </div>
             <div>
               <p className="text-xs uppercase text-gray-500">Premium</p>
               <p className="text-lg font-semibold text-gray-900">
-                ${policy.policyPremium.toLocaleString()}
+                {policy.policy_premium ? `$${Number(policy.policy_premium).toLocaleString()}` : ""}
               </p>
             </div>
             <div>
               <p className="text-xs uppercase text-gray-500">Line of Business</p>
-              <p className="text-sm text-gray-700">{policy.lineOfBusiness}</p>
+              <p className="text-sm text-gray-700">{policy.line_of_business}</p>
             </div>
             <div>
               <p className="text-xs uppercase text-gray-500">Writing Carrier</p>
-              <p className="text-sm text-gray-700">{policy.writingCarrier}</p>
+              <p className="text-sm text-gray-700">{policy.writing_carrier}</p>
             </div>
           </div>
         </div>
 
-        <RenewalWorkflowClient policy={policy} />
+        <RenewalWorkflowClient policy={policyForClient} />
       </div>
     </main>
   );

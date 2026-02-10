@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // reactCompiler: true  ← 删除
+  // reactCompiler: true  ← Delete
   experimental: {
-    /* other experimental flags */
+    serverActions: {
+      bodySizeLimit: "10mb",
+    },
   },
 };
 

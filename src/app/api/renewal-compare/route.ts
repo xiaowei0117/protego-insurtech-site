@@ -1,9 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 
-function formatSize(bytes: number) {
-  if (!Number.isFinite(bytes)) return "0 KB";
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type ExtractedDoc = {
+  text: string;
+  premium: number | null;
+  coverages: Record<string, string>;
+};
+
+const COVERAGE_PATTERNS: Array<{ key: string; label: string; regex: RegExp }> = [
+  { key: "bodily_injury", label: "Bodily Injury", regex: /bodily injury|\\bbi\\b/i },
+  { key: "property_damage", label: "Property Damage", regex: /property damage|\\bpd\\b/i },
+  { key: "medical", label: "Medical Payments", regex: /medical payments|med pay|medpay/i },
+  { key: "uninsured", label: "Uninsured Motorist", regex: /uninsured motorist|um\\b/i },
+  { key: "underinsured", label: "Underinsured Motorist", regex: /underinsured motorist|uim\\b/i },
+  { key: "pip", label: "PIP", regex: /personal injury protection|\\bpip\\b/i },
+  { key: "collision", label: "Collision", regex: /collision/i },
+  { key: "comprehensive", label: "Comprehensive", regex: /comprehensive/i },
+  { key: "rental", label: "Rental", regex: /rental/i },
+  { key: "roadside", label: "Roadside", regex: /roadside|towing/i },
+  { key: "deductible", label: "Deductible", regex: /deductible/i },
+];
 
 function safeNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string") return null;
@@ -11,8 +29,129 @@ function safeNumber(value: FormDataEntryValue | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeLine(line: string) {
+  return line.replace(/\s+/g, " ").trim();
+}
+
+function extractNumericTokens(line: string) {
+  const tokens: string[] = [];
+  const currencyMatches = line.match(/\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g);
+  if (currencyMatches) {
+    tokens.push(...currencyMatches);
+  }
+  const ratioMatches = line.match(/\d{1,3}\/\d{1,3}(?:,\d{3})?/g);
+  if (ratioMatches) {
+    tokens.push(...ratioMatches);
+  }
+  return tokens;
+}
+
+function pickCoverageValue(line: string) {
+  const tokens = extractNumericTokens(line);
+  if (!tokens.length) return "";
+  const ratio = tokens.find((t) => t.includes("/"));
+  return ratio || tokens[tokens.length - 1];
+}
+
+function parsePremiumFromText(text: string) {
+  const lines = text.split(/\r?\n/).map(normalizeLine).filter(Boolean);
+  const premiumLines = lines.filter((line) => /premium/i.test(line));
+  const numbers: number[] = [];
+  for (const line of premiumLines) {
+    const tokens = extractNumericTokens(line);
+    for (const token of tokens) {
+      const value = Number(token.replace(/[$,]/g, ""));
+      if (Number.isFinite(value)) numbers.push(value);
+    }
+  }
+  if (!numbers.length) return null;
+  return Math.max(...numbers);
+}
+
+function parseCoverages(text: string) {
+  const lines = text.split(/\r?\n/).map(normalizeLine).filter(Boolean);
+  const coverages: Record<string, string> = {};
+  for (const line of lines) {
+    for (const pattern of COVERAGE_PATTERNS) {
+      if (pattern.regex.test(line)) {
+        const value = pickCoverageValue(line);
+        if (value && !coverages[pattern.label]) {
+          coverages[pattern.label] = value;
+        }
+      }
+    }
+  }
+  return coverages;
+}
+
+async function extractTextFromFile(file: File) {
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const type = (file.type || "").toLowerCase();
+  if (type.includes("pdf") || file.name.toLowerCase().endsWith(".pdf")) {
+    const pdfParse = await getPdfParse();
+    const parsed = await pdfParse(buffer);
+    return parsed?.text || "";
+  }
+
+  if (type.startsWith("image/")) {
+    const { createWorker } = await import("tesseract.js");
+    const worker = await createWorker("eng");
+    const { data } = await worker.recognize(buffer);
+    await worker.terminate();
+    return data?.text || "";
+  }
+
+  return "";
+}
+
+let pdfParseCache: any = null;
+async function getPdfParse() {
+  if (pdfParseCache) return pdfParseCache;
+  const mod: any = await import("pdf-parse/lib/pdf-parse.js");
+  pdfParseCache = mod?.default || mod;
+  return pdfParseCache;
+}
+
+async function extractDoc(file: File): Promise<ExtractedDoc> {
+  const text = await extractTextFromFile(file);
+  const premium = parsePremiumFromText(text);
+  const coverages = parseCoverages(text);
+  return { text, premium, coverages };
+}
+
+function diffCoverages(oldDoc: ExtractedDoc, newDoc: ExtractedDoc) {
+  const diffs: string[] = [];
+  const keys = new Set([
+    ...Object.keys(oldDoc.coverages),
+    ...Object.keys(newDoc.coverages),
+  ]);
+
+  for (const key of keys) {
+    const before = oldDoc.coverages[key] || "";
+    const after = newDoc.coverages[key] || "";
+    if (before && !after) {
+      diffs.push(`${key}: removed (was ${before}).`);
+    } else if (!before && after) {
+      diffs.push(`${key}: added (${after}).`);
+    } else if (before && after && before !== after) {
+      diffs.push(`${key}: ${before} → ${after}.`);
+    }
+  }
+  return diffs;
+}
+
+function diffPremium(oldDoc: ExtractedDoc, newDoc: ExtractedDoc) {
+  if (oldDoc.premium === null || newDoc.premium === null) return null;
+  const delta = newDoc.premium - oldDoc.premium;
+  const direction = delta >= 0 ? "increase" : "decrease";
+  return `Premium ${direction}: $${Math.abs(delta).toFixed(2)} (from $${oldDoc.premium.toFixed(
+    2
+  )} to $${newDoc.premium.toFixed(2)}).`;
+}
+
 export async function POST(req: NextRequest) {
   try {
+    console.log("renewal-compare: received request");
     const formData = await req.formData();
     const oldPolicy = formData.get("oldPolicy") as File | null;
     const renewalPolicy = formData.get("renewalPolicy") as File | null;
@@ -25,42 +164,47 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const oldSize = oldPolicy.size || 0;
-    const renewalSize = renewalPolicy.size || 0;
-    const sizeDiff = renewalSize - oldSize;
-    const sizeDiffPct =
-      oldSize > 0 ? Math.round((Math.abs(sizeDiff) / oldSize) * 100) : null;
+    const [oldDoc, renewalDoc] = await Promise.all([
+      extractDoc(oldPolicy),
+      extractDoc(renewalPolicy),
+    ]);
 
-    const oldVsRenewal = [
-      `Prior term file: ${oldPolicy.name} (${formatSize(oldSize)}, ${oldPolicy.type || "unknown"}).`,
-      `Renewal file: ${renewalPolicy.name} (${formatSize(renewalSize)}, ${renewalPolicy.type || "unknown"}).`,
-    ];
+    const oldVsRenewal: string[] = [];
+    const premiumDiff = diffPremium(oldDoc, renewalDoc);
+    if (premiumDiff) oldVsRenewal.push(premiumDiff);
+    oldVsRenewal.push(...diffCoverages(oldDoc, renewalDoc));
 
-    if (sizeDiffPct !== null) {
+    if (!oldVsRenewal.length) {
       oldVsRenewal.push(
-        `Document size changed by ${sizeDiffPct}% (${sizeDiff >= 0 ? "+" : "-"}${formatSize(
-          Math.abs(sizeDiff)
-        )}). Review coverage limits, endorsements, and deductibles for changes.`
-      );
-    } else {
-      oldVsRenewal.push(
-        "Unable to compute document size difference. Review coverage limits, endorsements, and deductibles for changes."
+        "No structured coverage changes detected. Review endorsements and declarations manually."
       );
     }
 
-    const renewalVsOtherQuotes = otherQuotes.map((file) => {
-      const quoteSize = file.size || 0;
-      const diff = renewalSize - quoteSize;
-      const diffPct =
-        quoteSize > 0 ? Math.round((Math.abs(diff) / quoteSize) * 100) : null;
-      const sizeNote =
-        diffPct === null
-          ? "Size comparison not available."
-          : `Renewal document is ${diff >= 0 ? diffPct : -diffPct}% ${
-              diff >= 0 ? "larger" : "smaller"
-            } than this quote.`;
-      return `Quote file: ${file.name} (${formatSize(quoteSize)}). ${sizeNote}`;
-    });
+    const renewalVsOtherQuotes: string[] = [];
+    for (const file of otherQuotes) {
+      const quoteDoc = await extractDoc(file);
+      const quoteLines: string[] = [];
+
+      if (renewalDoc.premium !== null && quoteDoc.premium !== null) {
+        const delta = renewalDoc.premium - quoteDoc.premium;
+        quoteLines.push(
+          `Quote ${file.name}: premium ${delta >= 0 ? "higher" : "lower"} by $${Math.abs(
+            delta
+          ).toFixed(2)} compared to renewal.`
+        );
+      } else {
+        quoteLines.push(`Quote ${file.name}: premium not detected for comparison.`);
+      }
+
+      const coverageDiffs = diffCoverages(quoteDoc, renewalDoc);
+      if (coverageDiffs.length) {
+        quoteLines.push(`Coverage differences: ${coverageDiffs.join(" ")}`);
+      } else {
+        quoteLines.push("Coverage differences: none detected.");
+      }
+
+      renewalVsOtherQuotes.push(quoteLines.join(" "));
+    }
 
     const policyNumber = (formData.get("policyNumber") as string) || "";
     const itemNumber = (formData.get("itemNumber") as string) || "";
@@ -71,15 +215,21 @@ export async function POST(req: NextRequest) {
     const writingCarrier = (formData.get("writingCarrier") as string) || "";
     const policyPremium = safeNumber(formData.get("policyPremium"));
 
+    const premiumLine =
+      renewalDoc.premium !== null
+        ? `Renewal premium extracted from documents: $${renewalDoc.premium.toFixed(2)}.`
+        : policyPremium !== null
+        ? `Renewal premium on record: $${policyPremium.toLocaleString()}.`
+        : "Renewal premium to be confirmed.";
+
     const emailDraft = `Hi ${firstName} ${lastName},
 
-I reviewed your renewal for policy ${policyNumber} (item ${itemNumber}) with ${writingCarrier}. The current term expires on ${expirationDate}. I compared the expiring term with the renewal offer and noted the key differences in coverage and pricing.
+I reviewed your renewal for policy ${policyNumber} (item ${itemNumber}) with ${writingCarrier}. The current term expires on ${expirationDate}. I compared the expiring term with the renewal offer and summarized the key differences.
 
-Your renewal premium is currently listed at ${
-      policyPremium !== null ? `$${policyPremium.toLocaleString()}` : "the proposed amount"
-    } for ${lineOfBusiness}. I can also review any competing quotes you share to confirm whether the renewal is the best fit.
+${premiumLine}
+Coverage highlights: ${oldVsRenewal.slice(0, 3).join(" ")}
 
-Would you like me to walk through the changes with you or update any coverage options before we proceed?
+If you have other quotes, I can compare them side-by-side to confirm the best fit. Would you like to review the changes together or adjust coverage options before we proceed?
 
 Best regards,
 [Your Name]`;
@@ -99,4 +249,8 @@ Best regards,
       { status: 500 }
     );
   }
+}
+
+export async function GET() {
+  return NextResponse.json({ status: "ok" }, { status: 200 });
 }

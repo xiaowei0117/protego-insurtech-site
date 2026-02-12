@@ -7,21 +7,47 @@ type ExtractedDoc = {
   text: string;
   premium: number | null;
   coverages: Record<string, string>;
+  docType: "auto" | "homeowners" | "dwelling_fire" | "unknown";
 };
 
-const COVERAGE_PATTERNS: Array<{ key: string; label: string; regex: RegExp }> = [
-  { key: "bodily_injury", label: "Bodily Injury", regex: /bodily injury|\\bbi\\b/i },
-  { key: "property_damage", label: "Property Damage", regex: /property damage|\\bpd\\b/i },
-  { key: "medical", label: "Medical Payments", regex: /medical payments|med pay|medpay/i },
-  { key: "uninsured", label: "Uninsured Motorist", regex: /uninsured motorist|um\\b/i },
-  { key: "underinsured", label: "Underinsured Motorist", regex: /underinsured motorist|uim\\b/i },
-  { key: "pip", label: "PIP", regex: /personal injury protection|\\bpip\\b/i },
-  { key: "collision", label: "Collision", regex: /collision/i },
-  { key: "comprehensive", label: "Comprehensive", regex: /comprehensive/i },
-  { key: "rental", label: "Rental", regex: /rental/i },
-  { key: "roadside", label: "Roadside", regex: /roadside|towing/i },
-  { key: "deductible", label: "Deductible", regex: /deductible/i },
-];
+const COVERAGE_TEMPLATES: Record<
+  ExtractedDoc["docType"],
+  Array<{ key: string; label: string; regex: RegExp }>
+> = {
+  auto: [
+    { key: "bodily_injury", label: "Bodily Injury", regex: /bodily injury|\\bbi\\b/i },
+    { key: "property_damage", label: "Property Damage", regex: /property damage|\\bpd\\b/i },
+    { key: "medical", label: "Medical Payments", regex: /medical payments|med pay|medpay/i },
+    { key: "uninsured", label: "Uninsured Motorist", regex: /uninsured motorist|\\bum\\b/i },
+    { key: "underinsured", label: "Underinsured Motorist", regex: /underinsured motorist|\\buim\\b/i },
+    { key: "pip", label: "PIP", regex: /personal injury protection|\\bpip\\b/i },
+    { key: "collision", label: "Collision", regex: /collision/i },
+    { key: "comprehensive", label: "Comprehensive", regex: /comprehensive/i },
+    { key: "rental", label: "Rental", regex: /rental/i },
+    { key: "roadside", label: "Roadside", regex: /roadside|towing/i },
+    { key: "deductible", label: "Deductible", regex: /deductible/i },
+  ],
+  homeowners: [
+    { key: "coverage_a", label: "Coverage A (Dwelling)", regex: /coverage\\s*a\\b|dwelling\\b/i },
+    { key: "coverage_b", label: "Coverage B (Other Structures)", regex: /coverage\\s*b\\b|other structures/i },
+    { key: "coverage_c", label: "Coverage C (Personal Property)", regex: /coverage\\s*c\\b|personal property/i },
+    { key: "coverage_d", label: "Coverage D (Loss of Use)", regex: /coverage\\s*d\\b|loss of use|additional living expense/i },
+    { key: "liability", label: "Personal Liability", regex: /personal liability|liability/i },
+    { key: "med_pay", label: "Medical Payments", regex: /medical payments|med pay|medpay/i },
+    { key: "deductible", label: "Deductible", regex: /deductible/i },
+    { key: "wind_hail", label: "Wind/Hail Deductible", regex: /wind.*hail|hail.*wind/i },
+  ],
+  dwelling_fire: [
+    { key: "coverage_a", label: "Coverage A (Dwelling)", regex: /coverage\\s*a\\b|dwelling\\b/i },
+    { key: "coverage_b", label: "Coverage B (Other Structures)", regex: /coverage\\s*b\\b|other structures/i },
+    { key: "coverage_c", label: "Coverage C (Personal Property)", regex: /coverage\\s*c\\b|personal property/i },
+    { key: "coverage_d", label: "Coverage D (Loss of Use)", regex: /coverage\\s*d\\b|loss of use|fair rental value/i },
+    { key: "liability", label: "Personal Liability", regex: /personal liability|liability/i },
+    { key: "med_pay", label: "Medical Payments", regex: /medical payments|med pay|medpay/i },
+    { key: "deductible", label: "Deductible", regex: /deductible/i },
+  ],
+  unknown: [],
+};
 
 function safeNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string") return null;
@@ -68,11 +94,33 @@ function parsePremiumFromText(text: string) {
   return Math.max(...numbers);
 }
 
-function parseCoverages(text: string) {
+function detectDocType(text: string): ExtractedDoc["docType"] {
+  const normalized = text.toLowerCase();
+  if (
+    /homeowners|homeowner|ho-?3|ho-?5|ho-?6|coverage a|coverage b|coverage c/.test(normalized)
+  ) {
+    return "homeowners";
+  }
+  if (/dwelling fire|dp-?3|dp-?1|dwelling policy|dp\s*policy/.test(normalized)) {
+    return "dwelling_fire";
+  }
+  if (
+    /bodily injury|property damage|vehicle|auto policy|personal auto|collision|comprehensive/.test(
+      normalized
+    )
+  ) {
+    return "auto";
+  }
+  return "unknown";
+}
+
+function parseCoverages(text: string, docType: ExtractedDoc["docType"]) {
   const lines = text.split(/\r?\n/).map(normalizeLine).filter(Boolean);
   const coverages: Record<string, string> = {};
+  const patterns = COVERAGE_TEMPLATES[docType] || [];
+  if (!patterns.length) return coverages;
   for (const line of lines) {
-    for (const pattern of COVERAGE_PATTERNS) {
+    for (const pattern of patterns) {
       if (pattern.regex.test(line)) {
         const value = pickCoverageValue(line);
         if (value && !coverages[pattern.label]) {
@@ -115,8 +163,9 @@ async function getPdfParse() {
 async function extractDoc(file: File): Promise<ExtractedDoc> {
   const text = await extractTextFromFile(file);
   const premium = parsePremiumFromText(text);
-  const coverages = parseCoverages(text);
-  return { text, premium, coverages };
+  const docType = detectDocType(text);
+  const coverages = parseCoverages(text, docType);
+  return { text, premium, coverages, docType };
 }
 
 function diffCoverages(oldDoc: ExtractedDoc, newDoc: ExtractedDoc) {
@@ -172,6 +221,15 @@ export async function POST(req: NextRequest) {
     const oldVsRenewal: string[] = [];
     const premiumDiff = diffPremium(oldDoc, renewalDoc);
     if (premiumDiff) oldVsRenewal.push(premiumDiff);
+    if (oldDoc.docType !== "unknown" && renewalDoc.docType !== "unknown") {
+      if (oldDoc.docType !== renewalDoc.docType) {
+        oldVsRenewal.push(
+          `Document types differ (${oldDoc.docType} vs ${renewalDoc.docType}). Results may be incomplete.`
+        );
+      } else {
+        oldVsRenewal.push(`Document type detected: ${oldDoc.docType}.`);
+      }
+    }
     oldVsRenewal.push(...diffCoverages(oldDoc, renewalDoc));
 
     if (!oldVsRenewal.length) {

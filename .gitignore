@@ -40,3 +40,6 @@ coverage
 
 prisma/dev.db
 My Insurance DB.session.sql
+
+# internal documents
+docs/FAISS_OPS.md

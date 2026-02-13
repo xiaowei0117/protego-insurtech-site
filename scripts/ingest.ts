@@ -11,6 +11,7 @@ const prisma = new PrismaClient();
 const DOCS_ROOT = process.env.DOCS_ROOT || "";
 const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 const EMB_MODEL = process.env.EMBEDDING_MODEL || "nomic-embed-text"; // 768-dim for nomic-embed-text
+const FAISS_URL = process.env.FAISS_URL || "";
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 120;
 const require = createRequire(import.meta.url);
@@ -22,6 +23,7 @@ const carrierFilter = (() => {
   if (idx >= 0) return argv[idx + 1] || "";
   return "";
 })();
+const forceReingest = argv.includes("--force");
 
 function walkFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -54,6 +56,19 @@ async function embed(text: string) {
   }
   const data = await res.json();
   return data?.embedding as number[];
+}
+
+async function addToFaiss(vectors: number[][], ids: string[]) {
+  if (!FAISS_URL || vectors.length === 0) return;
+  const res = await fetch(`${FAISS_URL}/add`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ vectors, ids }),
+  });
+  if (!res.ok) {
+    const msg = await res.text();
+    throw new Error(`FAISS add failed: ${res.status} ${msg}`);
+  }
 }
 
 async function readDoc(filePath: string): Promise<string> {
@@ -95,7 +110,7 @@ async function ingestFile(filePath: string) {
       const meta = doc.meta as any;
       return meta && typeof meta === "object" && meta.hash === hash;
     });
-    if (hasSameHash) {
+    if (hasSameHash && !forceReingest) {
       console.log(`Skip unchanged ${docName}`);
       return;
     }
@@ -119,6 +134,7 @@ async function ingestFile(filePath: string) {
   });
 
   const embeddings = await Promise.all(chunks.map((c) => embed(c)));
+  const chunkIds = chunks.map(() => crypto.randomUUID());
 
   // Insert chunks via raw SQL to support pgvector column
   await prisma.$transaction(
@@ -129,7 +145,7 @@ async function ingestFile(filePath: string) {
       return prisma.$executeRawUnsafe(
         `INSERT INTO "Chunk" ("id","docId","carrier","lob","state","program","version","page","chunk","embedding","createdAt")
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::vector,$11)`,
-        crypto.randomUUID(),
+        chunkIds[idx],
         doc.id,
         carrier,
         lob,
@@ -143,6 +159,7 @@ async function ingestFile(filePath: string) {
       );
     })
   );
+  await addToFaiss(embeddings as number[][], chunkIds);
 
   console.log(`Ingested ${docName}: ${chunks.length} chunks`);
 }
@@ -173,6 +190,9 @@ async function main() {
 
   if (carrierFilter) {
     console.log(`Carrier filter: ${carrierFilter}`);
+  }
+  if (forceReingest) {
+    console.log("Force re-ingest enabled");
   }
 
   for (const file of filtered) {

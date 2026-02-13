@@ -12,7 +12,7 @@ type AskPayload = {
   question: string;
 };
 
-export function useCarrierAssistant() {
+export function useCarrierAssistant(endpoint = "/api/carrier-assistant") {
   const [loading, setLoading] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
   const [conditions, setConditions] = useState<string | null>(null);
@@ -24,7 +24,7 @@ export function useCarrierAssistant() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/carrier-assistant", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

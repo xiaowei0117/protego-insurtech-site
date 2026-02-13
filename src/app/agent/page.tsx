@@ -50,6 +50,20 @@ export default async function AgentHomePage() {
                   Open
                 </a>
               </div>
+              <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 p-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">Carrier Assistant - FAISS</div>
+                  <div className="text-xs text-gray-600">
+                    FAISS-backed retrieval for carrier guidelines.
+                  </div>
+                </div>
+                <a
+                  href="/agent/carrier-assistant-faiss"
+                  className="inline-flex items-center justify-center rounded-lg bg-[#1EC8C8] px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-[#19b3b3]"
+                >
+                  Open
+                </a>
+              </div>
               {/* Add more tools here as they are built */}
             </div>
           </div>

@@ -147,7 +147,17 @@ export default function CarrierAssistantPage() {
                 <h3 className="text-xl font-semibold">
                   {answer} <span className="text-sm font-normal text-gray-600">({carrier} • {lob} • {stateVal})</span>
                 </h3>
-                {conditions && <p className="mt-1 text-sm text-gray-800">{conditions}</p>}
+                {conditions && (
+                  <div className="mt-2 space-y-1 text-sm text-gray-800">
+                    {conditions
+                      .split(/\n|\*(?=\s)/)
+                      .map((line) => line.trim())
+                      .filter(Boolean)
+                      .map((line, i) => (
+                        <p key={i}>{line.startsWith("*") ? line : `• ${line}`}</p>
+                      ))}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button

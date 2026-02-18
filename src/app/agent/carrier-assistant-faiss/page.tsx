@@ -151,7 +151,37 @@ export default function CarrierAssistantFaissPage() {
                     ({carrier} › {lob} › {stateVal})
                   </span>
                 </h3>
-                {conditions && <p className="mt-1 text-sm text-gray-800">{conditions}</p>}
+                {conditions && (
+                  <div className="mt-2 space-y-1 text-sm text-gray-800">
+                    {conditions
+                      .split("\n")
+                      .map((line) => line.trim())
+                      .filter(Boolean)
+                      .filter((line) => /^answer:/i.test(line) === false)
+                      .map((line, i) => {
+                        // Citation line: [#1 doc p.20]
+                        if (/^\[#\d+/.test(line)) {
+                          return (
+                            <p key={i} className="ml-4 text-xs text-gray-500 italic">{line}</p>
+                          );
+                        }
+                        // Section header: ends with ":" and no leading dash
+                        if (!line.startsWith("-") && line.endsWith(":")) {
+                          return (
+                            <p key={i} className="mt-2 font-semibold text-gray-900">{line}</p>
+                          );
+                        }
+                        // Bullet point: starts with "- "
+                        if (line.startsWith("- ")) {
+                          return (
+                            <p key={i} className="ml-2">• {line.slice(2)}</p>
+                          );
+                        }
+                        // Plain text
+                        return <p key={i}>{line}</p>;
+                      })}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button

@@ -191,11 +191,7 @@ Respond with:
     const genJson = await genRes.json();
     const llmContent = genJson?.response || "";
     const llmMs = Date.now() - tLlm0;
-    const answerLabel = /yes/i.test(llmContent)
-      ? "Yes"
-      : /no/i.test(llmContent)
-      ? "No"
-      : "Refer";
+    const answerLabel = /\brefer\b/i.test(llmContent) ? "Refer" : /\byes\b/i.test(llmContent) ? "Yes" : /\bno\b/i.test(llmContent) ? "No" : "Refer";
 
     const sources = reranked.map((r, idx) => ({
       doc: r.docname || r.docid,

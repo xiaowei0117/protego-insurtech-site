@@ -10,6 +10,70 @@ const LLM_MODEL = process.env.LLM_MODEL || "llama3.1:8b";
 const TOP_K = Number(process.env.CARRIER_ASSISTANT_TOP_K || 5);
 const FAISS_CANDIDATE_MULTIPLIER = Number(process.env.FAISS_CANDIDATE_MULTIPLIER || 5);
 const RERANK_ALPHA = Number(process.env.CARRIER_ASSISTANT_RERANK_ALPHA || 0.02);
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+
+async function callOllama(prompt: string): Promise<string> {
+  const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: LLM_MODEL,
+      prompt,
+      stream: false,
+      options: { temperature: 0.2 },
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data?.response || "";
+}
+
+async function callGemini(prompt: string, apiVersion = "v1beta"): Promise<Response> {
+  return fetch(
+    `https://generativelanguage.googleapis.com/${apiVersion}/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+      }),
+    }
+  );
+}
+
+async function callLLM(prompt: string): Promise<string> {
+  if (!GEMINI_API_KEY) return callOllama(prompt);
+
+  try {
+    // Try v1beta first, fall back to v1 if 404
+    let res = await callGemini(prompt, "v1beta");
+    if (res.status === 404) {
+      console.warn("[callLLM] v1beta 404 — retrying with v1 endpoint");
+      res = await callGemini(prompt, "v1");
+    }
+
+    // On rate limit, wait 5s and retry once
+    if (res.status === 429) {
+      console.warn("[callLLM] Gemini 429 — retrying in 5s...");
+      await new Promise((r) => setTimeout(r, 5000));
+      res = await callGemini(prompt, "v1beta");
+    }
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.warn(`[callLLM] Gemini error ${res.status} (model: ${GEMINI_MODEL}) — ${errBody.slice(0, 200)}`);
+      return callOllama(prompt);
+    }
+
+    const data = await res.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  } catch (err) {
+    console.warn("[callLLM] Gemini exception — falling back to Ollama:", err);
+    return callOllama(prompt);
+  }
+}
 
 type RetrievedChunk = {
   id: string;
@@ -167,40 +231,30 @@ export async function POST(req: Request) {
       .join("\n\n");
 
     const prompt = `
-You are a carrier eligibility assistant. You must ONLY use facts explicitly present in the Context.
-If the Context does not contain the answer, respond with "Refer" and explain that the information is not found.
-Do not add or infer any details not in the Context. Keep wording close to the source text.
+You are a knowledgeable insurance agent helping a colleague understand carrier guidelines.
+Use ONLY the facts in the Context below. Do not invent or assume anything not stated.
+If the Context does not contain enough information, respond with "Refer" and explain what is missing.
 
 Question: ${question}
 
 Context:
 ${context || "N/A"}
 
-Respond with:
-- Answer: Yes/No/Refer
-- Conditions: bullet points copied or tightly paraphrased from Context only
-- Include inline citations using [#n doc p.page] for every factual statement.
+Instructions:
+- Start with "Answer: Yes", "Answer: No", or "Answer: Refer" on the first line.
+- Then write a clear, organized explanation using plain English.
+- Group related points under short section headers when helpful (e.g. "When it is covered:", "When it is NOT covered:", "Conditions:").
+- Use "- " for each bullet point. Do not use "*".
+- After each factual statement, add a citation in the format [#n] referencing the context source.
+- Keep each bullet to one clear idea.
+- Do not repeat the same point twice.
 `.trim();
 
     const tLlm0 = Date.now();
-    const genRes = await fetch(`${OLLAMA_HOST}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        prompt,
-        stream: false,
-        options: { temperature: 0.2 },
-      }),
-    });
-    if (!genRes.ok) {
-      const msg = await genRes.text();
-      throw new Error(`LLM failed: ${genRes.status} ${msg}`);
-    }
-    const genJson = await genRes.json();
-    const llmContent = genJson?.response || "";
+    const llmContent = await callLLM(prompt);
     const llmMs = Date.now() - tLlm0;
-    const answerLabel = /yes/i.test(llmContent) ? "Yes" : /no/i.test(llmContent) ? "No" : "Refer";
+    console.log(`[carrier-assistant-faiss] LLM backend: ${GEMINI_API_KEY ? `Gemini (${GEMINI_MODEL})` : `Ollama (${LLM_MODEL})`}`);
+    const answerLabel = /\brefer\b/i.test(llmContent) ? "Refer" : /\byes\b/i.test(llmContent) ? "Yes" : /\bno\b/i.test(llmContent) ? "No" : "Refer";
 
     const sources = reranked.map((r, idx) => ({
       doc: r.docname || r.docid,
